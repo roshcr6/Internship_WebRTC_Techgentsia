@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Browser A (Offerer)</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #00ff00;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #00ffff;
+            text-shadow: 0 0 10px #00ffff;
+            margin-bottom: 30px;
+        }
+        .peer {
+            background: #0a0a0a;
+            border: 2px solid #0099ff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 0 20px rgba(0, 153, 255, 0.2);
+        }
+        
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected { background: rgba(0, 255, 0, 0.2); color: #00ff00; }
+        .status.connecting { background: rgba(255, 255, 0, 0.2); color: #ffff00; }
+        .status.disconnected { background: rgba(255, 0, 0, 0.2); color: #ff0000; }
+        
+        .console {
+            background: #000;
+            border: 1px solid #00ff00;
+            border-radius: 4px;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .console-msg { margin: 4px 0; }
+        .msg-log { color: #00ff00; }
+        .msg-error { color: #ff0000; }
+        .msg-ice { color: #ffaa00; }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+            font-family: inherit;
+            border-radius: 4px;
+        }
+        input[type="text"]::placeholder { color: #008800; }
+        input[type="text"]:focus { outline: none; border-color: #00ffff; box-shadow: 0 0 10px rgba(0, 255, 255, 0.3); }
+        
+        button {
+            padding: 8px 16px;
+            background: #0099ff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+            transition: all 0.3s;
+        }
+        button:hover { background: #00ccff; transform: scale(1.05); }
+        button:active { transform: scale(0.95); }
+        button:disabled { background: #666; cursor: not-allowed; opacity: 0.5; }
+        
+        .control-panel {
+            background: #0a0a0a;
+            border: 2px solid #0099ff;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .control-panel h3 { color: #00ffff; margin-top: 0; }
+        
+        .messages { margin-top: 15px; padding: 10px; background: #111; border-left: 3px solid #0099ff; border-radius: 4px; }
+        .messages p { margin: 5px 0; font-size: 12px; }
+        .sent { color: #00ff00; }
+        .received { color: #ffaa00; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔵 Browser A (Offerer)</h1>
+        
+        <div class="control-panel">
+            <h3>⚡ Connection Control</h3>
+            <button onclick="startConnection()">Start Connection</button>
+            <button onclick="clearAll()">Clear All</button>
+            <p id="connectionStatus" style="margin: 10px 0; font-size: 14px;">Waiting to connect...</p>
+        </div>
+
+        <div class="peer">
+            <div class="status disconnected" id="status">Disconnected</div>
+            <div class="console" id="log"></div>
+            <div class="input-group">
+                <input type="text" id="messageInput" placeholder="Enter message..." />
+                <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+            </div>
+            <div class="messages" id="messages"></div>
+        </div>
+    </div>
+
+    <script>
+        const state = {
+            pc: null,
+            dc: null,
+            logsA: []
+        };
+
+        function logToUI(msg, type = 'log') {
+            const logEl = document.getElementById('log');
+            const cssClass = `msg-${type}`;
+            const entry = `<div class="console-msg ${cssClass}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            
+            state.logsA.push(entry);
+            if (state.logsA.length > 50) state.logsA.shift();
+            
+            logEl.innerHTML = state.logsA.join('');
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateStatus(status) {
+            const el = document.getElementById('status');
+            el.className = `status ${status}`;
+            el.textContent = status === 'connected' ? '✅ Connected' : status === 'connecting' ? '⏳ Connecting...' : '❌ Disconnected';
+            document.getElementById('sendBtn').disabled = status !== 'connected';
+        }
+
+        async function startConnection() {
+            logToUI('📡 Browser A: Initializing...', 'log');
+            updateStatus('connecting');
+
+            try {
+                // Create peer connection
+                state.pc = new RTCPeerConnection({ 
+                    iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] 
+                });
+
+                // Create data channel
+                state.dc = state.pc.createDataChannel('chat', { ordered: true });
+                setupDataChannel();
+                logToUI('✅ Data channel created', 'log');
+
+                // ICE candidates
+                let iceCount = 0;
+                state.pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        iceCount++;
+                        logToUI(`🧊 ICE candidate #${iceCount}: ${event.candidate.candidate.split(' ')[4] || 'mDNS'}`, 'ice');
+                        let iceListA = JSON.parse(localStorage.getItem('ice_list_a') || '[]');
+                        iceListA.push(event.candidate);
+                        localStorage.setItem('ice_list_a', JSON.stringify(iceListA));
+                        localStorage.setItem('ice_list_a_updated', Date.now().toString());
+                    } else {
+                        logToUI(`✅ ICE gathering complete (${iceCount} candidates)`, 'log');
+                    }
+                };
+
+                // Create offer
+                logToUI('📝 Creating offer...', 'log');
+                const offer = await state.pc.createOffer();
+                await state.pc.setLocalDescription(offer);
+                localStorage.setItem('offer', JSON.stringify(offer));
+                logToUI('✅ Offer created and saved', 'log');
+                logToUI('🔄 Waiting for answer from Browser B...', 'log');
+
+                // Wait for answer
+                let answerReceived = false;
+                for (let i = 0; i < 100; i++) {
+                    await new Promise(r => setTimeout(r, 500));
+                    const answer = localStorage.getItem('answer');
+                    if (answer) {
+                        answerReceived = true;
+                        logToUI('📨 Answer received!', 'log');
+                        await state.pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answer)));
+                        logToUI('✅ Answer set as remote description', 'log');
+                        break;
+                    }
+                }
+
+                if (!answerReceived) {
+                    logToUI('❌ Answer not received - is Browser B running?', 'error');
+                    return;
+                }
+
+                // Exchange ICE candidates with Browser B
+                logToUI('🔄 Exchanging ICE candidates...', 'log');
+                for (let i = 0; i < 30; i++) {
+                    await new Promise(r => setTimeout(r, 300));
+                    const iceListB = JSON.parse(localStorage.getItem('ice_list_b') || '[]');
+                    if (iceListB.length > 0) {
+                        let addedCount = 0;
+                        for (const candidate of iceListB) {
+                            try {
+                                await state.pc.addIceCandidate(new RTCIceCandidate(candidate));
+                                addedCount++;
+                            } catch (e) {
+                                // Ignore duplicate candidates
+                            }
+                        }
+                        logToUI(`✅ Added ${addedCount} ICE candidates from Browser B`, 'log');
+                        break;
+                    }
+                }
+
+                // Monitor connection
+                state.pc.onconnectionstatechange = () => {
+                    logToUI(`🔗 Connection state: ${state.pc.connectionState}`, 'log');
+                    if (state.pc.connectionState === 'connected') {
+                        updateStatus('connected');
+                        logToUI('🎉 Ready to send messages!', 'log');
+                    }
+                };
+
+                // Also monitor datachannel state
+                state.pc.ondatachannel = (event) => {
+                    logToUI('📨 Received data channel', 'log');
+                };
+
+            } catch (err) {
+                logToUI(`❌ Error: ${err.message}`, 'error');
+            }
+        }
+
+        function setupDataChannel() {
+            state.dc.onopen = () => {
+                logToUI('📂 Data channel opened', 'log');
+                updateStatus('connected');
+            };
+
+            state.dc.onclose = () => {
+                logToUI('📂 Data channel closed', 'log');
+                updateStatus('disconnected');
+            };
+
+            state.dc.onerror = (err) => {
+                logToUI(`❌ Data channel error: ${err}`, 'error');
+            };
+
+            state.dc.onmessage = (event) => {
+                logToUI(`💬 Received: ${event.data}`, 'log');
+                const msgsEl = document.getElementById('messages');
+                const p = document.createElement('p');
+                p.className = 'received';
+                p.textContent = `[Received] ${event.data}`;
+                msgsEl.appendChild(p);
+            };
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const msg = input.value.trim();
+            if (!msg || !state.dc || state.dc.readyState !== 'open') return;
+            
+            state.dc.send(msg);
+            logToUI(`💬 Sent: ${msg}`, 'log');
+            
+            const msgsEl = document.getElementById('messages');
+            const p = document.createElement('p');
+            p.className = 'sent';
+            p.textContent = `[Sent] ${msg}`;
+            msgsEl.appendChild(p);
+            
+            input.value = '';
+        }
+
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        function clearAll() {
+            if (state.dc) state.dc.close();
+            if (state.pc) state.pc.close();
+            state.logsA = [];
+            document.getElementById('log').innerHTML = '';
+            document.getElementById('messages').innerHTML = '';
+            updateStatus('disconnected');
+            
+            localStorage.removeItem('offer');
+            localStorage.removeItem('answer');
+            localStorage.removeItem('ice_list_a');
+            localStorage.removeItem('ice_list_b');
+            localStorage.removeItem('ice_list_a_updated');
+            localStorage.removeItem('ice_list_b_updated');
+        }
+    </script>
+</body>
+</html>
