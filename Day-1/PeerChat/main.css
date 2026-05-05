@@ -1,13 +1,139 @@
-#videos{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap:2em;
-
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 }
 
-.video-player{
+body {
+    font-family: Arial, sans-serif;
+    background: black;
+    color: white;
+}
+
+#connection-status {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 10px 15px;
+    font-size: 12px;
+    z-index: 1000;
+}
+
+.status-connecting {
+    background-color: white;
+    color: black;
+}
+
+.status-connected {
+    background-color: white;
+    color: black;
+}
+
+.status-error {
+    background-color: red;
+    color: white;
+}
+
+.status-disconnected {
+    background-color: black;
+    color: white;
+    border: 1px solid white;
+}
+
+.status-ready {
+    background-color: white;
+    color: black;
+}
+
+#videos {
+    display: grid;
+    grid-template-columns: 1fr;
+    height: 100vh;
+    overflow: hidden;
+    background-color: black;
+}
+
+.video-player {
     background-color: black;
     width: 100%;
-    height: 300px;
+    height: 100%;
+    object-fit: cover;
+}
 
+#user-2 {
+    display: none;
+}
+
+.smallFrame {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    height: 150px;
+    width: 250px;
+    border: 2px solid white;
+    z-index: 998;
+    overflow: hidden;
+}
+
+#controls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    z-index: 500;
+}
+
+.control-container {
+    background-color: white;
+    padding: 0;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    border: 2px solid black;
+}
+
+.control-container:hover {
+    background-color: #f0f0f0;
+}
+
+.control-container img {
+    height: 40px;
+    width: 40px;
+}
+
+#leave-btn {
+    background-color: red;
+    border-color: black;
+}
+
+#leave-btn:hover {
+    background-color: #cc0000;
+}
+
+a {
+    text-decoration: none;
+}
+
+@media screen and (max-width: 768px) {
+    .smallFrame {
+        height: 100px;
+        width: 150px;
+    }
+
+    .control-container {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 8px 12px;
+    }
+
+    .control-container img {
+        height: 18px;
+        width: 18px;
+    }
 }

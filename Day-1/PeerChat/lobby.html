@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>PeerChat</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <link rel='stylesheet' type='text/css' href='lobby.css'>
+</head>
+<body>
+    
+    <main id="lobby-container">
+        <div id="form-container">
+            <div id="form__container__header">
+                <h1>PeerChat</h1>
+                <p class="subtitle">WebRTC Video Chat</p>
+            </div>
+
+            <div id="form__content__wrapper">
+                <form id="join-form">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            name="invite_link" 
+                            placeholder="Enter Room ID" 
+                            required
+                            minlength="3"
+                        />
+                        <p class="input-hint">Share room ID with friend</p>
+                    </div>
+                    <input type="submit" value="Join" />
+                </form>
+                <p class="tips">Enter same room ID to connect</p>
+            </div>
+        </div>
+    </main>
+
+</body>
+
+<script>
+    let form = document.getElementById('join-form');
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        let roomId = e.target.invite_link.value.trim();
+        
+        if (roomId.length < 3) {
+            alert('Room ID must be at least 3 characters');
+            return;
+        }
+        
+        window.location = `index.html?room=${encodeURIComponent(roomId)}`;
+    });
+
+    window.addEventListener('load', () => {
+        document.querySelector('input[name="invite_link"]').focus();
+    });
+</script>
+
+</html>

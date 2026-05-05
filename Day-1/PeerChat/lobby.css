@@ -1,0 +1,122 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: black;
+    color: white;
+    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+#lobby-container {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+#form-container {
+    width: 90%;
+    max-width: 400px;
+    background-color: white;
+    color: black;
+    border: 2px solid black;
+}
+
+#form__container__header {
+    padding: 30px;
+    text-align: center;
+    background-color: black;
+    color: white;
+    border-bottom: 2px solid white;
+}
+
+#form__container__header h1 {
+    font-size: 24px;
+    margin-bottom: 8px;
+}
+
+.subtitle {
+    font-size: 12px;
+}
+
+#form__content__wrapper {
+    padding: 30px;
+}
+
+.input-group {
+    margin-bottom: 20px;
+}
+
+input[type="text"],
+input[type="submit"] {
+    width: 100%;
+    border: 2px solid black;
+    padding: 12px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+}
+
+input[type="text"] {
+    background-color: white;
+    color: black;
+    margin-bottom: 8px;
+}
+
+input[type="text"]::placeholder {
+    color: #666;
+}
+
+input[type="text"]:focus {
+    outline: none;
+    border: 2px solid red;
+}
+
+.input-hint {
+    font-size: 11px;
+    color: #666;
+    margin: 0;
+}
+
+input[type="submit"] {
+    background-color: black;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 12px;
+}
+
+input[type="submit"]:hover {
+    background-color: red;
+}
+
+.tips {
+    font-size: 12px;
+    color: #666;
+    margin-top: 15px;
+    text-align: center;
+    padding-top: 15px;
+    border-top: 1px solid #ccc;
+}
+
+@media screen and (max-width: 600px) {
+    #form-container {
+        width: 95%;
+    }
+
+    input[type="text"],
+    input[type="submit"] {
+        font-size: 16px;
+    }
+}
+
+input[type='submit']:hover {
+    background-color: #b366f9;
+}
