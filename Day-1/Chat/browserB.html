@@ -106,10 +106,10 @@
 </head>
 <body>
     <div class="container">
-        <h1>🔴 Browser B (Answerer)</h1>
+        <h1></h1> Browser B (Answerer)</h1>
         
         <div class="control-panel">
-            <h3>⚡ Connection Control</h3>
+            <h3>Connection Control</h3>
             <button onclick="startConnection()">Start Connection</button>
             <button onclick="clearAll()">Clear All</button>
             <p id="connectionStatus" style="margin: 10px 0; font-size: 14px;">Waiting to connect...</p>
@@ -148,12 +148,12 @@
         function updateStatus(status) {
             const el = document.getElementById('status');
             el.className = `status ${status}`;
-            el.textContent = status === 'connected' ? '✅ Connected' : status === 'connecting' ? '⏳ Connecting...' : '❌ Disconnected';
+            el.textContent = status === 'connected' ? ' Connected' : status === 'connecting' ? '⏳ Connecting...' : '❌ Disconnected';
             document.getElementById('sendBtn').disabled = status !== 'connected';
         }
 
         async function startConnection() {
-            logToUI('📡 Browser B: Initializing...', 'log');
+            logToUI(' Browser B: Initializing...', 'log');
             updateStatus('connecting');
 
             try {
@@ -166,7 +166,7 @@
                 state.pc.ondatachannel = (event) => {
                     state.dc = event.channel;
                     setupDataChannel();
-                    logToUI('✅ Data channel received from peer', 'log');
+                    logToUI(' Data channel received from peer', 'log');
                 };
 
                 // ICE candidates
@@ -174,45 +174,45 @@
                 state.pc.onicecandidate = (event) => {
                     if (event.candidate) {
                         iceCount++;
-                        logToUI(`🧊 ICE candidate #${iceCount}: ${event.candidate.candidate.split(' ')[4] || 'mDNS'}`, 'ice');
+                        logToUI(` ICE candidate #${iceCount}: ${event.candidate.candidate.split(' ')[4] || 'mDNS'}`, 'ice');
                         let iceListB = JSON.parse(localStorage.getItem('ice_list_b') || '[]');
                         iceListB.push(event.candidate);
                         localStorage.setItem('ice_list_b', JSON.stringify(iceListB));
                         localStorage.setItem('ice_list_b_updated', Date.now().toString());
                     } else {
-                        logToUI(`✅ ICE gathering complete (${iceCount} candidates)`, 'log');
+                        logToUI(` ICE gathering complete (${iceCount} candidates)`, 'log');
                     }
                 };
 
                 // Wait for offer
-                logToUI('🔄 Waiting for offer from Browser A...', 'log');
+                logToUI(' Waiting for offer from Browser A...', 'log');
                 let offerReceived = false;
                 for (let i = 0; i < 100; i++) {
                     await new Promise(r => setTimeout(r, 500));
                     const offer = localStorage.getItem('offer');
                     if (offer) {
                         offerReceived = true;
-                        logToUI('📨 Offer received!', 'log');
+                        logToUI(' Offer received!', 'log');
                         await state.pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
-                        logToUI('✅ Offer set as remote description', 'log');
+                        logToUI(' Offer set as remote description', 'log');
                         break;
                     }
                 }
 
                 if (!offerReceived) {
-                    logToUI('❌ Offer not received - is Browser A running?', 'error');
+                    logToUI(' Offer not received - is Browser A running?', 'error');
                     return;
                 }
 
                 // Create and send answer
-                logToUI('📝 Creating answer...', 'log');
+                logToUI(' Creating answer...', 'log');
                 const answer = await state.pc.createAnswer();
                 await state.pc.setLocalDescription(answer);
                 localStorage.setItem('answer', JSON.stringify(answer));
-                logToUI('✅ Answer created and saved', 'log');
+                logToUI(' Answer created and saved', 'log');
 
                 // Exchange ICE candidates with Browser A
-                logToUI('🔄 Exchanging ICE candidates...', 'log');
+                logToUI(' Exchanging ICE candidates...', 'log');
                 for (let i = 0; i < 30; i++) {
                     await new Promise(r => setTimeout(r, 300));
                     const iceListA = JSON.parse(localStorage.getItem('ice_list_a') || '[]');
@@ -226,42 +226,42 @@
                                 // Ignore duplicate candidates
                             }
                         }
-                        logToUI(`✅ Added ${addedCount} ICE candidates from Browser A`, 'log');
+                        logToUI(` Added ${addedCount} ICE candidates from Browser A`, 'log');
                         break;
                     }
                 }
 
                 // Monitor connection
                 state.pc.onconnectionstatechange = () => {
-                    logToUI(`🔗 Connection state: ${state.pc.connectionState}`, 'log');
+                    logToUI(` Connection state: ${state.pc.connectionState}`, 'log');
                     if (state.pc.connectionState === 'connected') {
                         updateStatus('connected');
-                        logToUI('🎉 Ready to send messages!', 'log');
+                        logToUI('Ready to send messages!', 'log');
                     }
                 };
 
             } catch (err) {
-                logToUI(`❌ Error: ${err.message}`, 'error');
+                logToUI(`Error: ${err.message}`, 'error');
             }
         }
 
         function setupDataChannel() {
             state.dc.onopen = () => {
-                logToUI('📂 Data channel opened', 'log');
+                logToUI(' Data channel opened', 'log');
                 updateStatus('connected');
             };
 
             state.dc.onclose = () => {
-                logToUI('📂 Data channel closed', 'log');
+                logToUI('Data channel closed', 'log');
                 updateStatus('disconnected');
             };
 
             state.dc.onerror = (err) => {
-                logToUI(`❌ Data channel error: ${err}`, 'error');
+                logToUI(` Data channel error: ${err}`, 'error');
             };
 
             state.dc.onmessage = (event) => {
-                logToUI(`💬 Received: ${event.data}`, 'log');
+                logToUI(` Received: ${event.data}`, 'log');
                 const msgsEl = document.getElementById('messages');
                 const p = document.createElement('p');
                 p.className = 'received';
@@ -276,7 +276,7 @@
             if (!msg || !state.dc || state.dc.readyState !== 'open') return;
             
             state.dc.send(msg);
-            logToUI(`💬 Sent: ${msg}`, 'log');
+            logToUI(` Sent: ${msg}`, 'log');
             
             const msgsEl = document.getElementById('messages');
             const p = document.createElement('p');
