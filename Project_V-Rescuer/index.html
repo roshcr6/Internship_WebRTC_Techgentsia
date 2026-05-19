@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en" data-phase="idle">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="V-Rescuer — Edge-AI WebRTC Codec Fallback System. Maintains communication via DataChannel captions when bandwidth drops critically low." />
+  <title>V-Rescuer — Edge-AI Codec Fallback</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════  HEADER  ════════════════════════════════════ -->
+<header class="app-header">
+  <div class="header-brand">
+    <div class="brand-logo">🛡️</div>
+    <div class="brand-text">
+      <div class="brand-title">V-Rescuer</div>
+      <div class="brand-sub">Edge-AI Codec Fallback System</div>
+    </div>
+  </div>
+
+  <div class="header-right">
+    <div id="network-mode-badge" data-mode="good">Network: Healthy</div>
+    <div class="call-timer" id="call-timer">00:00</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════  ALERT BANNER  ══════════════════════════════ -->
+<div id="alert-banner">
+  <span class="alert-icon">🚨</span>
+  CRITICAL: Bandwidth below 15 kbps — Media streams suspended. DataChannel captions active.
+</div>
+
+<!-- ═══════════════════════  MAIN BODY  ═════════════════════════════════ -->
+<main class="app-body">
+
+  <!-- ── VIDEO STAGE ─────────────────────────────────────────────────── -->
+  <section class="video-stage">
+
+    <!-- Local Video -->
+    <div class="video-panel" id="local-panel">
+      <div class="panel-label">🔵 You — Local</div>
+      <video id="local-video" autoplay muted playsinline></video>
+      <div id="local-caption"></div>
+    </div>
+
+    <!-- Remote Video -->
+    <div class="video-panel" id="remote-panel" data-state="idle">
+      <div class="panel-label">Remote Peer</div>
+
+      <!-- Dynamic state badges -->
+      <div class="remote-state-badge badge-degraded">⚠️ Audio Only</div>
+      <div class="remote-state-badge badge-critical">📡 Captions Live</div>
+
+      <!-- Waiting placeholder -->
+      <div class="remote-placeholder" id="remote-placeholder">
+        <div class="placeholder-avatar">👤</div>
+        <div class="placeholder-text" id="remote-placeholder-text">Waiting for peer to join…</div>
+      </div>
+
+      <!-- Video element (hidden until connected) -->
+      <video id="remote-video" autoplay playsinline style="display:none;"></video>
+
+      <!-- Live Caption Overlay -->
+      <div id="caption-overlay">
+        <div class="caption-header-bar">
+          <div class="ch-dot"></div>
+          <div class="ch-label">Live Transcript Active</div>
+          <div class="ch-mode">DataChannel · UDP-like</div>
+        </div>
+        <div id="caption-text"></div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ── SIDEBAR ──────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Call Controls -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">📞</div>
+        Call Controls
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-caller" id="btn-caller">
+          📡 Start as Caller
+        </button>
+        <button class="btn btn-callee" id="btn-callee">
+          📻 Join as Callee
+        </button>
+        <button class="btn btn-end" id="btn-end" disabled>
+          🔴 End Call
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Network Stats -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">📊</div>
+        Live Network Stats
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-label">Bitrate</div>
+          <div class="stat-value" id="stat-bitrate" data-level="">— kbps</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Pkt Loss</div>
+          <div class="stat-value" id="stat-packetloss">0.0%</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">RTT</div>
+          <div class="stat-value" id="stat-rtt">— ms</div>
+        </div>
+      </div>
+
+      <div class="bitrate-section">
+        <div class="bitrate-label-row">
+          <span>Outgoing Bandwidth</span>
+          <span id="bitrate-val-label">0 bps</span>
+        </div>
+        <div class="bitrate-track">
+          <div class="bitrate-fill" id="bitrate-bar-fill"></div>
+        </div>
+        <div class="threshold-markers">
+          <span class="t-zero">0</span>
+          <span class="t-crit">↑ 15k</span>
+          <span class="t-warn">↑ 100k</span>
+          <span class="t-max">2 Mbps</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connection Status -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">🔗</div>
+        Connection Status
+      </div>
+      <div class="status-list">
+        <div class="status-row">
+          <span class="status-key">Peer State</span>
+          <span class="status-val" id="connection-state" data-state="">idle</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">ICE State</span>
+          <span class="status-val" id="ice-state">—</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">DataChannel</span>
+          <span class="status-val" id="dc-state" data-open="false">closed</span>
+        </div>
+        <div class="status-row">
+          <span class="status-key">Speech API</span>
+          <span class="status-val" id="speech-support">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Network Simulation -->
+    <div class="card">
+      <div class="card-title">
+        <div class="card-title-icon">⚗️</div>
+        Network Simulation
+      </div>
+      <div class="sim-desc">
+        Force a network state to demo the fallback protocol. Use Chrome DevTools → Network throttling for a realistic test.
+      </div>
+      <div class="sim-buttons">
+        <button class="btn-sim sim-good" id="sim-good">
+          <span class="sim-icon">✅</span>
+          <span class="sim-text">
+            <span class="sim-title">Healthy Network</span>
+            <span class="sim-sub">Full video + audio restored</span>
+          </span>
+        </button>
+        <button class="btn-sim sim-degraded" id="sim-degraded">
+          <span class="sim-icon">⚠️</span>
+          <span class="sim-text">
+            <span class="sim-title">Degraded — Audio Only</span>
+            <span class="sim-sub">Video disabled · &lt; 100 kbps</span>
+          </span>
+        </button>
+        <button class="btn-sim sim-critical" id="sim-critical">
+          <span class="sim-icon">🚨</span>
+          <span class="sim-text">
+            <span class="sim-title">Critical Fallback</span>
+            <span class="sim-sub">Media off · DataChannel captions</span>
+          </span>
+        </button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── ACTIVITY LOG ─────────────────────────────────────────────────── -->
+  <section class="card log-area">
+    <div class="log-toolbar">
+      <div class="card-title" style="margin-bottom:0;">
+        <div class="card-title-icon">📋</div>
+        Activity Log
+      </div>
+      <div class="log-count" id="log-count">1</div>
+    </div>
+    <div class="log-scroll" id="log-panel">
+      <div class="log-entry log-info">
+        <span class="log-ts">—</span>
+        <span class="log-msg">V-Rescuer initialized. Open two browser tabs → Tab 1: Caller · Tab 2: Callee</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══════════════════════  INSTRUCTION BANNER  ════════════════════════ -->
+<div class="instruction-banner">
+  <div class="step"><span class="step-num">1</span>Open <strong>two tabs</strong></div>
+  <span class="divider">→</span>
+  <div class="step"><span class="step-num">2</span>Tab 1: <strong>Caller</strong></div>
+  <span class="divider">→</span>
+  <div class="step"><span class="step-num">3</span>Tab 2: <strong>Callee</strong></div>
+  <span class="divider">→</span>
+  <div class="step"><span class="step-num">4</span>Test with <strong>Simulate</strong> buttons</div>
+</div>
+
+<!-- ═══════════════════════  SCRIPTS  ═══════════════════════════════════ -->
+<script src="js/config.js"></script>
+<script src="js/signaling.js"></script>
+<script src="js/stats-monitor.js"></script>
+<script src="js/speech-engine.js"></script>
+<script src="js/data-channel.js"></script>
+<script src="js/peer-connection.js"></script>
+<script src="js/app.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // ── Speech API badge ──────────────────────────────────────────────────
+  const supEl = document.getElementById('speech-support');
+  const supp = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  supEl.textContent = supp ? 'Supported ✓' : 'Unsupported ✗';
+  supEl.style.color = supp ? 'var(--green)' : 'var(--red)';
+
+  // ── Log counter ───────────────────────────────────────────────────────
+  const logPanel = document.getElementById('log-panel');
+  const logCount = document.getElementById('log-count');
+  const observer = new MutationObserver(() => {
+    logCount.textContent = logPanel.children.length;
+  });
+  observer.observe(logPanel, { childList: true });
+
+  // ── Log entry auto-coloring via MutationObserver ──────────────────────
+  const logColorObserver = new MutationObserver((mutations) => {
+    mutations.forEach((m) => {
+      m.addedNodes.forEach((node) => {
+        if (!node.classList?.contains('log-entry')) return;
+        const txt = node.textContent || '';
+        if      (txt.includes('✗') || txt.includes('🚨') || txt.includes('CRITICAL')) node.classList.add('log-error');
+        else if (txt.includes('⚠'))                                                   node.classList.add('log-warn');
+        else if (txt.includes('✓') || txt.includes('📶') || txt.includes('Restoring')) node.classList.add('log-ok');
+        else                                                                           node.classList.add('log-info');
+      });
+    });
+  });
+  logColorObserver.observe(logPanel, { childList: true });
+
+  // ── Alert banner wiring ───────────────────────────────────────────────
+  const alertBanner = document.getElementById('alert-banner');
+  const badge = document.getElementById('network-mode-badge');
+  const mutObs = new MutationObserver(() => {
+    const mode = badge.getAttribute('data-mode');
+    alertBanner.classList.toggle('visible', mode === 'critical');
+  });
+  mutObs.observe(badge, { attributes: true, attributeFilter: ['data-mode'] });
+
+  // ── Bitrate label sync ────────────────────────────────────────────────
+  // Patched via stats-update listener — expose on window for app.js
+  window._updateBitrateLabel = (bps) => {
+    const el = document.getElementById('bitrate-val-label');
+    if (!el) return;
+    if (bps >= 1_000_000) el.textContent = (bps/1_000_000).toFixed(2) + ' Mbps';
+    else if (bps >= 1_000) el.textContent = (bps/1_000).toFixed(1) + ' kbps';
+    else el.textContent = Math.round(bps) + ' bps';
+  };
+});
+</script>
+
+</body>
+</html>
