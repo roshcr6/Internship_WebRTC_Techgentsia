@@ -3,289 +3,155 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="V-Rescuer — Edge-AI WebRTC Codec Fallback System. Maintains communication via DataChannel captions when bandwidth drops critically low." />
-  <title>V-Rescuer — Edge-AI Codec Fallback</title>
+  <meta name="description" content="V-Rescuer — Fault-tolerant WebRTC video call with AI caption fallback." />
+  <title>V-Rescuer</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/call.css" />
 </head>
 <body>
 
-<!-- ═══════════════════════  HEADER  ════════════════════════════════════ -->
-<header class="app-header">
-  <div class="header-brand">
-    <div class="brand-logo">🛡️</div>
-    <div class="brand-text">
-      <div class="brand-title">V-Rescuer</div>
-      <div class="brand-sub">Edge-AI Codec Fallback System</div>
+<!-- ════════════════════════  LOBBY  ════════════════════════════════════════ -->
+<div id="lobby">
+  <div class="lobby-card">
+
+    <div class="lobby-header">
+      <h1>🛡️ V-Rescuer</h1>
+      <p>Fault-Tolerant Video Communication</p>
+    </div>
+
+    <div class="lobby-body">
+      <p class="lobby-hint">Open this page in two tabs to connect</p>
+      <div class="lobby-buttons">
+        <button class="btn-lobby btn-caller" id="btn-caller">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 1a9 9 0 0 1 9 9v4a9 9 0 0 1-18 0v-4a9 9 0 0 1 9-9zm0 2a7 7 0 0 0-7 7v4a7 7 0 0 0 14 0v-4a7 7 0 0 0-7-7z"/><path d="M8.5 9a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5a.5.5 0 0 1 .5-.5zm7 0a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5a.5.5 0 0 1 .5-.5z"/></svg>
+          Start as Caller (Tab 1)
+        </button>
+        <button class="btn-lobby btn-callee" id="btn-callee">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+          Join as Callee (Tab 2)
+        </button>
+      </div>
+    </div>
+
+    <div class="lobby-footer">
+      <span>BroadcastChannel · WebRTC · Whisper AI</span>
+      <a href="admin.html" target="_blank" id="admin-link">Admin Dashboard ↗</a>
     </div>
   </div>
+</div>
 
-  <div class="header-right">
-    <div id="network-mode-badge" data-mode="good">Network: Healthy</div>
-    <div class="call-timer" id="call-timer">00:00</div>
+<!-- ════════════════════════  CALL STAGE  ═══════════════════════════════════ -->
+<div id="call-stage">
+
+  <!-- Remote Video (full-screen) -->
+  <video id="video-remote" autoplay playsinline></video>
+
+  <!-- Waiting Placeholder -->
+  <div id="remote-placeholder">
+    <div class="ph-avatar">👤</div>
+    <div class="ph-text" id="ph-text">Waiting for peer to join…</div>
   </div>
-</header>
 
-<!-- ═══════════════════════  ALERT BANNER  ══════════════════════════════ -->
-<div id="alert-banner">
-  <span class="alert-icon">🚨</span>
-  CRITICAL: Bandwidth below 15 kbps — Media streams suspended. DataChannel captions active.
+  <!-- Local PiP Video -->
+  <div id="local-pip">
+    <video id="video-local" autoplay muted playsinline></video>
+  </div>
+
+  <!-- Local speaking indicator -->
+  <div id="local-caption"></div>
+
+  <!-- Caption Overlay (shown on critical mode) -->
+  <div id="caption-overlay">
+    <div class="caption-bar">
+      <div class="caption-dot"></div>
+      <div class="caption-bar-label">Live AI Transcript</div>
+      <div class="caption-bar-tag" id="caption-source-tag">Whisper · DataChannel</div>
+    </div>
+    <div id="caption-text"></div>
+  </div>
+
+  <!-- Controls Bar -->
+  <div id="controls">
+    <!-- Mic -->
+    <button class="ctrl-btn" id="btn-mic" title="Toggle microphone">
+      <svg viewBox="0 0 24 24"><path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v6a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-1 13.93A7.001 7.001 0 0 1 5 11H7a5 5 0 0 0 10 0h2a7.001 7.001 0 0 1-6 6.93V20h3v2H8v-2h3v-2.07z"/></svg>
+    </button>
+
+    <!-- Camera -->
+    <button class="ctrl-btn" id="btn-camera" title="Toggle camera">
+      <svg viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+    </button>
+
+    <div class="ctrl-spacer"></div>
+
+    <!-- Network badge -->
+    <div id="network-badge" data-mode="good">Healthy</div>
+
+    <!-- Call Timer -->
+    <div id="call-timer">00:00</div>
+
+    <div class="ctrl-spacer"></div>
+
+    <!-- Admin link -->
+    <button class="ctrl-btn" id="btn-admin" title="Open admin panel" onclick="window.open('admin.html','_blank')">
+      <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+    </button>
+
+    <!-- End Call -->
+    <button class="ctrl-btn" id="btn-end" title="End call" disabled>
+      <svg viewBox="0 0 24 24"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/><line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
 </div>
 
-<!-- ═══════════════════════  MAIN BODY  ═════════════════════════════════ -->
-<main class="app-body">
-
-  <!-- ── VIDEO STAGE ─────────────────────────────────────────────────── -->
-  <section class="video-stage">
-
-    <!-- Local Video -->
-    <div class="video-panel" id="local-panel">
-      <div class="panel-label">🔵 You — Local</div>
-      <video id="local-video" autoplay muted playsinline></video>
-      <div id="local-caption"></div>
-    </div>
-
-    <!-- Remote Video -->
-    <div class="video-panel" id="remote-panel" data-state="idle">
-      <div class="panel-label">Remote Peer</div>
-
-      <!-- Dynamic state badges -->
-      <div class="remote-state-badge badge-degraded">⚠️ Audio Only</div>
-      <div class="remote-state-badge badge-critical">📡 Captions Live</div>
-
-      <!-- Waiting placeholder -->
-      <div class="remote-placeholder" id="remote-placeholder">
-        <div class="placeholder-avatar">👤</div>
-        <div class="placeholder-text" id="remote-placeholder-text">Waiting for peer to join…</div>
-      </div>
-
-      <!-- Video element (hidden until connected) -->
-      <video id="remote-video" autoplay playsinline style="display:none;"></video>
-
-      <!-- Live Caption Overlay -->
-      <div id="caption-overlay">
-        <div class="caption-header-bar">
-          <div class="ch-dot"></div>
-          <div class="ch-label">Live Transcript Active</div>
-          <div class="ch-mode">DataChannel · UDP-like</div>
-        </div>
-        <div id="caption-text"></div>
-      </div>
-    </div>
-
-  </section>
-
-  <!-- ── SIDEBAR ──────────────────────────────────────────────────────── -->
-  <aside class="sidebar">
-
-    <!-- Call Controls -->
-    <div class="card">
-      <div class="card-title">
-        <div class="card-title-icon">📞</div>
-        Call Controls
-      </div>
-      <div class="btn-group">
-        <button class="btn btn-caller" id="btn-caller">
-          📡 Start as Caller
-        </button>
-        <button class="btn btn-callee" id="btn-callee">
-          📻 Join as Callee
-        </button>
-        <button class="btn btn-end" id="btn-end" disabled>
-          🔴 End Call
-        </button>
-      </div>
-    </div>
-
-    <!-- Live Network Stats -->
-    <div class="card">
-      <div class="card-title">
-        <div class="card-title-icon">📊</div>
-        Live Network Stats
-      </div>
-
-      <div class="stats-grid">
-        <div class="stat-item">
-          <div class="stat-label">Bitrate</div>
-          <div class="stat-value" id="stat-bitrate" data-level="">— kbps</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Pkt Loss</div>
-          <div class="stat-value" id="stat-packetloss">0.0%</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">RTT</div>
-          <div class="stat-value" id="stat-rtt">— ms</div>
-        </div>
-      </div>
-
-      <div class="bitrate-section">
-        <div class="bitrate-label-row">
-          <span>Outgoing Bandwidth</span>
-          <span id="bitrate-val-label">0 bps</span>
-        </div>
-        <div class="bitrate-track">
-          <div class="bitrate-fill" id="bitrate-bar-fill"></div>
-        </div>
-        <div class="threshold-markers">
-          <span class="t-zero">0</span>
-          <span class="t-crit">↑ 15k</span>
-          <span class="t-warn">↑ 100k</span>
-          <span class="t-max">2 Mbps</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Connection Status -->
-    <div class="card">
-      <div class="card-title">
-        <div class="card-title-icon">🔗</div>
-        Connection Status
-      </div>
-      <div class="status-list">
-        <div class="status-row">
-          <span class="status-key">Peer State</span>
-          <span class="status-val" id="connection-state" data-state="">idle</span>
-        </div>
-        <div class="status-row">
-          <span class="status-key">ICE State</span>
-          <span class="status-val" id="ice-state">—</span>
-        </div>
-        <div class="status-row">
-          <span class="status-key">DataChannel</span>
-          <span class="status-val" id="dc-state" data-open="false">closed</span>
-        </div>
-        <div class="status-row">
-          <span class="status-key">Speech API</span>
-          <span class="status-val" id="speech-support">—</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Network Simulation -->
-    <div class="card">
-      <div class="card-title">
-        <div class="card-title-icon">⚗️</div>
-        Network Simulation
-      </div>
-      <div class="sim-desc">
-        Force a network state to demo the fallback protocol. Use Chrome DevTools → Network throttling for a realistic test.
-      </div>
-      <div class="sim-buttons">
-        <button class="btn-sim sim-good" id="sim-good">
-          <span class="sim-icon">✅</span>
-          <span class="sim-text">
-            <span class="sim-title">Healthy Network</span>
-            <span class="sim-sub">Full video + audio restored</span>
-          </span>
-        </button>
-        <button class="btn-sim sim-degraded" id="sim-degraded">
-          <span class="sim-icon">⚠️</span>
-          <span class="sim-text">
-            <span class="sim-title">Degraded — Audio Only</span>
-            <span class="sim-sub">Video disabled · &lt; 100 kbps</span>
-          </span>
-        </button>
-        <button class="btn-sim sim-critical" id="sim-critical">
-          <span class="sim-icon">🚨</span>
-          <span class="sim-text">
-            <span class="sim-title">Critical Fallback</span>
-            <span class="sim-sub">Media off · DataChannel captions</span>
-          </span>
-        </button>
-      </div>
-    </div>
-
-  </aside>
-
-  <!-- ── ACTIVITY LOG ─────────────────────────────────────────────────── -->
-  <section class="card log-area">
-    <div class="log-toolbar">
-      <div class="card-title" style="margin-bottom:0;">
-        <div class="card-title-icon">📋</div>
-        Activity Log
-      </div>
-      <div class="log-count" id="log-count">1</div>
-    </div>
-    <div class="log-scroll" id="log-panel">
-      <div class="log-entry log-info">
-        <span class="log-ts">—</span>
-        <span class="log-msg">V-Rescuer initialized. Open two browser tabs → Tab 1: Caller · Tab 2: Callee</span>
-      </div>
-    </div>
-  </section>
-
-</main>
-
-<!-- ═══════════════════════  INSTRUCTION BANNER  ════════════════════════ -->
-<div class="instruction-banner">
-  <div class="step"><span class="step-num">1</span>Open <strong>two tabs</strong></div>
-  <span class="divider">→</span>
-  <div class="step"><span class="step-num">2</span>Tab 1: <strong>Caller</strong></div>
-  <span class="divider">→</span>
-  <div class="step"><span class="step-num">3</span>Tab 2: <strong>Callee</strong></div>
-  <span class="divider">→</span>
-  <div class="step"><span class="step-num">4</span>Test with <strong>Simulate</strong> buttons</div>
-</div>
-
-<!-- ═══════════════════════  SCRIPTS  ═══════════════════════════════════ -->
+<!-- ════════════════════════  SCRIPTS  ══════════════════════════════════════ -->
 <script src="js/config.js"></script>
 <script src="js/signaling.js"></script>
 <script src="js/stats-monitor.js"></script>
-<script src="js/speech-engine.js"></script>
 <script src="js/data-channel.js"></script>
 <script src="js/peer-connection.js"></script>
-<script src="js/app.js"></script>
+<script src="js/admin-bridge.js"></script>
+<script type="module" src="js/speech-engine.js"></script>
+<script src="js/app.js" defer></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-  // ── Speech API badge ──────────────────────────────────────────────────
-  const supEl = document.getElementById('speech-support');
-  const supp = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  supEl.textContent = supp ? 'Supported ✓' : 'Unsupported ✗';
-  supEl.style.color = supp ? 'var(--green)' : 'var(--red)';
 
-  // ── Log counter ───────────────────────────────────────────────────────
-  const logPanel = document.getElementById('log-panel');
-  const logCount = document.getElementById('log-count');
-  const observer = new MutationObserver(() => {
-    logCount.textContent = logPanel.children.length;
+  // ── Mic toggle ────────────────────────────────────────────────────────────
+  let micOn = true, camOn = true;
+  const btnMic = document.getElementById('btn-mic');
+  const btnCam = document.getElementById('btn-camera');
+
+  btnMic.addEventListener('click', () => {
+    if (!window.vRescuer?._peerConn?._localStream) return;
+    micOn = !micOn;
+    window.vRescuer._peerConn._localStream.getAudioTracks()
+      .forEach(t => t.enabled = micOn);
+    btnMic.classList.toggle('off', !micOn);
+    btnMic.title = micOn ? 'Mute mic' : 'Unmute mic';
   });
-  observer.observe(logPanel, { childList: true });
 
-  // ── Log entry auto-coloring via MutationObserver ──────────────────────
-  const logColorObserver = new MutationObserver((mutations) => {
-    mutations.forEach((m) => {
-      m.addedNodes.forEach((node) => {
-        if (!node.classList?.contains('log-entry')) return;
-        const txt = node.textContent || '';
-        if      (txt.includes('✗') || txt.includes('🚨') || txt.includes('CRITICAL')) node.classList.add('log-error');
-        else if (txt.includes('⚠'))                                                   node.classList.add('log-warn');
-        else if (txt.includes('✓') || txt.includes('📶') || txt.includes('Restoring')) node.classList.add('log-ok');
-        else                                                                           node.classList.add('log-info');
-      });
-    });
+  btnCam.addEventListener('click', () => {
+    if (!window.vRescuer?._peerConn?._localStream) return;
+    camOn = !camOn;
+    window.vRescuer._peerConn._localStream.getVideoTracks()
+      .forEach(t => t.enabled = camOn);
+    btnCam.classList.toggle('off', !camOn);
+    btnCam.title = camOn ? 'Hide camera' : 'Show camera';
   });
-  logColorObserver.observe(logPanel, { childList: true });
 
-  // ── Alert banner wiring ───────────────────────────────────────────────
-  const alertBanner = document.getElementById('alert-banner');
-  const badge = document.getElementById('network-mode-badge');
-  const mutObs = new MutationObserver(() => {
-    const mode = badge.getAttribute('data-mode');
-    alertBanner.classList.toggle('visible', mode === 'critical');
+  // ── Lobby → Call transition ───────────────────────────────────────────────
+  // This is driven by app.js calling ui.setPhase('connecting')
+  // which sets data-phase on body. We watch it here.
+  const lobby = document.getElementById('lobby');
+  const bodyObs = new MutationObserver(() => {
+    const phase = document.body.getAttribute('data-phase');
+    lobby.classList.toggle('hidden', phase !== 'idle');
+    // Reset mic/cam visual state on new call
+    if (phase === 'connecting') { micOn = true; camOn = true; btnMic.classList.remove('off'); btnCam.classList.remove('off'); }
   });
-  mutObs.observe(badge, { attributes: true, attributeFilter: ['data-mode'] });
-
-  // ── Bitrate label sync ────────────────────────────────────────────────
-  // Patched via stats-update listener — expose on window for app.js
-  window._updateBitrateLabel = (bps) => {
-    const el = document.getElementById('bitrate-val-label');
-    if (!el) return;
-    if (bps >= 1_000_000) el.textContent = (bps/1_000_000).toFixed(2) + ' Mbps';
-    else if (bps >= 1_000) el.textContent = (bps/1_000).toFixed(1) + ' kbps';
-    else el.textContent = Math.round(bps) + ' bps';
-  };
+  bodyObs.observe(document.body, { attributes: true, attributeFilter: ['data-phase'] });
 });
 </script>
 

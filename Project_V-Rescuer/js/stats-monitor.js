@@ -1,182 +1,196 @@
 /**
- * V-Rescuer Stats Monitor (The Heartbeat)
- * ─────────────────────────────────────────
- * Polls RTCPeerConnection.getStats() every N seconds.
- * Emits network state change events:
- *   - 'state:good'       → Normal operation
- *   - 'state:degraded'   → Audio-only mode (video disabled)
- *   - 'state:critical'   → Full fallback (media off, DataChannel captions)
- *   - 'stats-update'     → Raw stats for UI display
+ * V-Rescuer Stats Monitor v2
+ * ────────────────────────────
+ * Polls RTCPeerConnection.getStats() with ADAPTIVE intervals:
+ *   - Healthy  (>500kbps): poll every 3s   — minimal CPU impact
+ *   - Warning  (<200kbps): poll every 1s   — fast threshold detection
+ *   - Critical (<15kbps):  poll every 500ms — rapid recovery detection
+ *
+ * Uses recursive setTimeout (not setInterval) to prevent timer drift and
+ * allow true dynamic interval adjustment mid-poll.
+ *
+ * Emits:
+ *   'state-change' → { from, to }
+ *   'stats-update' → { bitrateBps, packetLossRatio, roundTripTime, ... }
  */
 
 class VRescuerStatsMonitor extends EventTarget {
   constructor(peerConnection) {
     super();
-    this._pc = peerConnection;
-    this._intervalId = null;
-    this._lastBytesSent = 0;
-    this._lastStatsTime = 0;
-    this._currentState = 'good'; // 'good' | 'degraded' | 'critical'
-    this._stableStartTime = null; // When network became stable again
+    this._pc              = peerConnection;
+    this._timeoutId       = null;
+    this._active          = false;
+    this._currentState    = 'good';
+    this._stableStartTime = null;
 
-    // Bind
-    this._poll = this._poll.bind(this);
+    // Delta tracking for bitrate calculation
+    this._lastBytesSent  = 0;
+    this._lastStatsTime  = 0;
   }
 
   start() {
-    if (this._intervalId) return;
-    console.log('[StatsMonitor] Starting heartbeat...');
-    this._poll(); // immediate first poll
-    this._intervalId = setInterval(this._poll, VRescuerConfig.STATS_POLL_INTERVAL_MS);
+    if (this._active) return;
+    this._active = true;
+    console.log('[StatsMonitor] Heartbeat started (adaptive).');
+    this._scheduleNext(0); // immediate first poll
   }
 
   stop() {
-    if (this._intervalId) {
-      clearInterval(this._intervalId);
-      this._intervalId = null;
-    }
+    this._active = false;
+    clearTimeout(this._timeoutId);
+    this._timeoutId = null;
     console.log('[StatsMonitor] Heartbeat stopped.');
   }
+
+  // ── Adaptive Scheduler ────────────────────────────────────────────────────
+
+  _scheduleNext(delayMs) {
+    this._timeoutId = setTimeout(async () => {
+      if (!this._active) return;
+      await this._poll();
+      if (this._active) {
+        this._scheduleNext(this._getAdaptiveInterval());
+      }
+    }, delayMs);
+  }
+
+  _getAdaptiveInterval() {
+    const cfg = VRescuerConfig;
+    switch (this._currentState) {
+      case 'critical':  return cfg.STATS_POLL_CRITICAL_MS;  // 500ms
+      case 'degraded':  return cfg.STATS_POLL_WARN_MS;      // 1000ms
+      default:          return cfg.STATS_POLL_GOOD_MS;      // 3000ms
+    }
+  }
+
+  // ── Core Poll ─────────────────────────────────────────────────────────────
 
   async _poll() {
     if (!this._pc || this._pc.connectionState === 'closed') return;
 
-    let stats;
+    let statsMap;
     try {
-      stats = await this._pc.getStats();
+      statsMap = await this._pc.getStats();
     } catch (e) {
-      console.warn('[StatsMonitor] getStats() failed:', e);
+      console.warn('[StatsMonitor] getStats() failed:', e.message);
       return;
     }
 
-    const report = this._parseStats(stats);
-    this._dispatchEvent('stats-update', report);
-    this._evaluateNetworkState(report);
+    const report = this._parseStats(statsMap);
+    this._emit('stats-update', report);
+    this._evaluateState(report);
   }
 
-  _parseStats(stats) {
+  // ── Stats Parser ──────────────────────────────────────────────────────────
+
+  _parseStats(statsMap) {
     const report = {
-      bitrateBps: 0,
-      packetLossRatio: 0,
-      roundTripTime: 0,
+      bitrateBps:             0,
+      packetLossRatio:        0,
+      roundTripTime:          0,
       availableOutgoingBitrate: 0,
-      bytesSent: 0,
-      packetsLost: 0,
-      packetsSent: 0,
-      timestamp: Date.now(),
+      bytesSent:              0,
+      packetsLost:            0,
+      packetsSent:            0,
+      jitter:                 0,
+      timestamp:              performance.now(),
     };
 
-    stats.forEach((stat) => {
-      // ─── ICE Candidate Pair (best source for available outgoing bitrate) ──
+    statsMap.forEach((stat) => {
+      // ICE Candidate Pair — best source for available outgoing bitrate
       if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
-        if (stat.availableOutgoingBitrate) {
-          report.availableOutgoingBitrate = Math.max(
-            report.availableOutgoingBitrate,
-            stat.availableOutgoingBitrate
-          );
+        if (stat.availableOutgoingBitrate > report.availableOutgoingBitrate) {
+          report.availableOutgoingBitrate = stat.availableOutgoingBitrate;
         }
       }
 
-      // ─── Outbound RTP (bytes sent for actual bitrate calculation) ─────────
-      if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
-        report.bytesSent += stat.bytesSent || 0;
-        report.packetsSent += stat.packetsSent || 0;
-      }
-      if (stat.type === 'outbound-rtp' && stat.kind === 'audio') {
-        report.bytesSent += stat.bytesSent || 0;
-        report.packetsSent += stat.packetsSent || 0;
+      // Outbound RTP — actual bytes/packets sent
+      if (stat.type === 'outbound-rtp') {
+        report.bytesSent    += stat.bytesSent    || 0;
+        report.packetsSent  += stat.packetsSent  || 0;
       }
 
-      // ─── Remote Inbound (packet loss) ─────────────────────────────────────
+      // Remote Inbound — packet loss and RTT
       if (stat.type === 'remote-inbound-rtp') {
-        report.packetsLost += stat.packetsLost || 0;
+        report.packetsLost  += stat.packetsLost  || 0;
+        report.jitter       += stat.jitter       || 0;
         if (stat.roundTripTime) {
-          report.roundTripTime = Math.max(report.roundTripTime, stat.roundTripTime * 1000); // convert to ms
+          report.roundTripTime = Math.max(report.roundTripTime, stat.roundTripTime * 1000);
         }
       }
     });
 
-    // Calculate actual bitrate from bytes delta
-    const now = Date.now();
+    // Calculate bitrate from bytes delta using performance.now() for accuracy
+    const now     = performance.now();
     const deltaMs = now - this._lastStatsTime;
     if (this._lastStatsTime > 0 && deltaMs > 0) {
-      const deltaBytes = report.bytesSent - this._lastBytesSent;
-      report.bitrateBps = Math.max(0, (deltaBytes * 8 * 1000) / deltaMs);
+      const deltaBytes    = report.bytesSent - this._lastBytesSent;
+      report.bitrateBps   = Math.max(0, (deltaBytes * 8 * 1000) / deltaMs);
     }
     this._lastBytesSent = report.bytesSent;
     this._lastStatsTime = now;
 
-    // Use availableOutgoingBitrate if actual is 0 (before media flows)
+    // Fall back to availableOutgoingBitrate if actual bitrate is 0
     if (report.bitrateBps === 0 && report.availableOutgoingBitrate > 0) {
       report.bitrateBps = report.availableOutgoingBitrate;
     }
 
-    // Compute packet loss ratio
-    const totalPackets = report.packetsSent + report.packetsLost;
-    report.packetLossRatio = totalPackets > 0 ? report.packetsLost / totalPackets : 0;
+    // Packet loss ratio
+    const total = report.packetsSent + report.packetsLost;
+    report.packetLossRatio = total > 0 ? report.packetsLost / total : 0;
 
     return report;
   }
 
-  _evaluateNetworkState(report) {
+  // ── Network State Machine ─────────────────────────────────────────────────
+
+  _evaluateState(report) {
     const { bitrateBps, packetLossRatio } = report;
     const cfg = VRescuerConfig;
 
-    let newState = 'good';
-
-    // Critical: below 15 kbps OR extreme packet loss
+    // Determine desired state from current metrics
+    let desiredState = 'good';
     if (
       (bitrateBps > 0 && bitrateBps < cfg.BITRATE_THRESHOLD_FULL_FALLBACK) ||
       packetLossRatio > cfg.PACKET_LOSS_CRITICAL
     ) {
-      newState = 'critical';
-    }
-    // Degraded: below 100 kbps OR significant packet loss
-    else if (
+      desiredState = 'critical';
+    } else if (
       (bitrateBps > 0 && bitrateBps < cfg.BITRATE_THRESHOLD_AUDIO_ONLY) ||
       packetLossRatio > cfg.PACKET_LOSS_THRESHOLD
     ) {
-      newState = 'degraded';
+      desiredState = 'degraded';
     }
 
-    // ─── State transition logic ───────────────────────────────────────────
-    if (newState !== 'good') {
-      this._stableStartTime = null; // reset stability clock
-    }
+    // ── Recovery guard: must be stable for RECOVERY_STABLE_MS before 'good' ──
+    if (desiredState !== 'good') {
+      this._stableStartTime = null; // Reset stability timer
 
-    if (newState === 'good' && this._currentState !== 'good') {
-      // Start recovery timer
+    } else if (this._currentState !== 'good') {
+      // Recovering: start or continue stability timer
       if (!this._stableStartTime) {
-        this._stableStartTime = Date.now();
-        console.log('[StatsMonitor] Network stabilizing... starting recovery timer.');
+        this._stableStartTime = performance.now();
+        console.log('[StatsMonitor] Network stabilising… recovery timer started.');
       }
-      // Only actually recover after RECOVERY_STABLE_MS
-      if (Date.now() - this._stableStartTime >= cfg.RECOVERY_STABLE_MS) {
-        this._transition('good');
-        this._stableStartTime = null;
-      }
-      return; // Don't change state yet
+      const stableMs = performance.now() - this._stableStartTime;
+      if (stableMs < cfg.RECOVERY_STABLE_MS) return; // Not stable long enough yet
+      this._stableStartTime = null;
     }
 
-    if (newState !== this._currentState) {
-      this._transition(newState);
+    // ── Transition if state changed ───────────────────────────────────────
+    if (desiredState !== this._currentState) {
+      const from = this._currentState;
+      this._currentState = desiredState;
+      console.log(`[StatsMonitor] State: ${from} → ${desiredState}`);
+      this._emit('state-change', { from, to: desiredState });
     }
   }
 
-  _transition(newState) {
-    const prevState = this._currentState;
-    this._currentState = newState;
-    console.log(`[StatsMonitor] State: ${prevState} → ${newState}`);
-    this._dispatchEvent('state-change', { from: prevState, to: newState });
-  }
-
-  _dispatchEvent(type, detail) {
+  _emit(type, detail) {
     this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
-  get currentState() {
-    return this._currentState;
-  }
+  get currentState() { return this._currentState; }
 }
 
 window.VRescuerStatsMonitor = VRescuerStatsMonitor;

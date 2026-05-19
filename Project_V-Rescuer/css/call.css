@@ -1,0 +1,320 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   V-Rescuer — Call Page UI
+   Design: Minimal black/white (PeerChat aesthetic + Inter font upgrade)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── Reset & Base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --black:    #000;
+  --white:    #fff;
+  --grey-100: #f5f5f5;
+  --grey-200: #e0e0e0;
+  --grey-500: #9e9e9e;
+  --grey-800: #212121;
+  --red:      #e53935;
+  --green:    #43a047;
+  --amber:    #f9a825;
+  --font:     'Inter', Arial, sans-serif;
+  --pip-w:    220px;
+  --pip-h:    124px;
+  --ctrl-h:   72px;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--black);
+  color: var(--white);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Lobby Overlay ─────────────────────────────────────────────────────────── */
+#lobby {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--black);
+  transition: opacity 0.4s ease, visibility 0.4s;
+}
+#lobby.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.lobby-card {
+  width: 90%; max-width: 380px;
+  background: var(--white);
+  color: var(--black);
+  border: 2px solid var(--white);
+}
+
+.lobby-header {
+  padding: 28px 28px 20px;
+  border-bottom: 2px solid var(--black);
+  text-align: center;
+  background: var(--black);
+  color: var(--white);
+}
+.lobby-header h1 {
+  font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px;
+}
+.lobby-header p {
+  font-size: 0.72rem; color: var(--grey-500); margin-top: 4px;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+
+.lobby-body { padding: 28px; }
+
+.lobby-hint {
+  font-size: 0.72rem; color: var(--grey-500);
+  text-align: center; margin-bottom: 20px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--grey-200);
+}
+
+.lobby-buttons { display: flex; flex-direction: column; gap: 10px; }
+
+.btn-lobby {
+  width: 100%; padding: 14px;
+  font-family: var(--font); font-size: 0.85rem; font-weight: 600;
+  border: 2px solid var(--black); cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn-lobby:active { transform: scale(0.98); }
+
+.btn-caller {
+  background: var(--black); color: var(--white);
+}
+.btn-caller:hover { background: var(--grey-800); }
+
+.btn-callee {
+  background: var(--white); color: var(--black);
+}
+.btn-callee:hover { background: var(--grey-100); }
+
+.lobby-footer {
+  padding: 14px 28px;
+  display: flex; justify-content: space-between; align-items: center;
+  border-top: 1px solid var(--grey-200);
+  font-size: 0.65rem; color: var(--grey-500);
+}
+.lobby-footer a {
+  color: var(--grey-500); text-decoration: none; font-size: 0.65rem;
+  border-bottom: 1px solid var(--grey-200);
+  transition: color 0.15s;
+}
+.lobby-footer a:hover { color: var(--black); }
+
+/* ── Call Stage ─────────────────────────────────────────────────────────────── */
+#call-stage {
+  position: fixed; inset: 0;
+  background: var(--black);
+}
+
+/* Remote video fills the stage */
+#video-remote {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  background: var(--black);
+}
+
+/* Waiting placeholder when no remote stream */
+#remote-placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px;
+  background: var(--black);
+}
+#remote-placeholder .ph-avatar {
+  width: 80px; height: 80px; border-radius: 50%;
+  background: var(--grey-800);
+  border: 2px solid var(--grey-500);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2rem;
+  position: relative;
+}
+/* Animated ring when connecting */
+[data-phase="connecting"] .ph-avatar::after {
+  content: '';
+  position: absolute; inset: -8px; border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--white);
+  border-right-color: var(--white);
+  animation: spin 1.4s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#remote-placeholder .ph-text {
+  font-size: 0.8rem; color: var(--grey-500); font-weight: 400;
+}
+
+/* ── Local PiP ─────────────────────────────────────────────────────────────── */
+#local-pip {
+  position: absolute;
+  top: 16px; left: 16px;
+  width: var(--pip-w); height: var(--pip-h);
+  border: 2px solid var(--white);
+  overflow: hidden; z-index: 100;
+  background: var(--grey-800);
+  cursor: grab;
+  transition: opacity 0.3s;
+}
+#local-pip:hover { opacity: 0.9; }
+#video-local {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  display: block;
+}
+
+/* ── Caption Overlay ────────────────────────────────────────────────────────── */
+#caption-overlay {
+  position: absolute;
+  bottom: calc(var(--ctrl-h) + 12px);
+  left: 16px; right: 16px; z-index: 200;
+  max-height: 28vh;
+  transform: translateY(120%); opacity: 0;
+  transition: transform 0.5s cubic-bezier(0.16,1,0.3,1), opacity 0.5s;
+  pointer-events: none;
+}
+#caption-overlay.active { transform: translateY(0); opacity: 1; }
+
+.caption-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 6px;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-bottom: none;
+}
+.caption-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+  animation: blink 0.9s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+.caption-bar-label {
+  font-size: 0.6rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: rgba(255,255,255,0.7); flex: 1;
+}
+.caption-bar-tag {
+  font-size: 0.58rem; color: rgba(255,255,255,0.35);
+  font-family: monospace;
+}
+
+#caption-text {
+  padding: 10px 14px 12px;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.12);
+  font-size: 0.92rem; line-height: 1.65;
+  color: var(--white);
+  max-height: 120px; overflow-y: auto;
+  scrollbar-width: none;
+}
+#caption-text::-webkit-scrollbar { display: none; }
+.caption-final  { color: var(--white); }
+.caption-interim { color: rgba(255,255,255,0.55); font-style: italic; }
+
+/* Local speaking pill */
+#local-caption {
+  position: absolute;
+  bottom: calc(var(--ctrl-h) + 14px);
+  left: 16px;
+  max-width: 280px;
+  padding: 5px 12px;
+  background: rgba(0,0,0,0.75);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.15);
+  font-size: 0.72rem; color: rgba(255,255,255,0.8);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transition: opacity 0.3s;
+  z-index: 201;
+}
+.lc-final  { color: var(--white); }
+.lc-interim { color: rgba(255,255,255,0.5); font-style: italic; }
+
+/* ── Controls Bar ───────────────────────────────────────────────────────────── */
+#controls {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: var(--ctrl-h);
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 0 20px;
+  background: rgba(0,0,0,0.82);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  z-index: 300;
+}
+
+.ctrl-btn {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.1);
+  color: var(--white);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.ctrl-btn:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.5); }
+.ctrl-btn:active { transform: scale(0.92); }
+.ctrl-btn.off {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.15);
+  opacity: 0.45;
+}
+.ctrl-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+/* End call button */
+#btn-end {
+  width: 52px; height: 52px;
+  background: var(--red);
+  border: 2px solid var(--red);
+  color: var(--white);
+}
+#btn-end:hover { background: #c62828; border-color: #c62828; }
+
+/* Network status pill in controls */
+#network-badge {
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.3px;
+  padding: 5px 12px; border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.2);
+  display: flex; align-items: center; gap: 5px;
+  transition: all 0.4s;
+  white-space: nowrap;
+}
+#network-badge::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  flex-shrink: 0; transition: background 0.4s;
+}
+#network-badge[data-mode="good"]     { color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.15); }
+#network-badge[data-mode="good"]::before    { background: var(--green); box-shadow: 0 0 6px var(--green); }
+#network-badge[data-mode="degraded"] { color: var(--amber); border-color: rgba(249,168,37,0.4); }
+#network-badge[data-mode="degraded"]::before { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: blink 1.4s ease-in-out infinite; }
+#network-badge[data-mode="critical"] { color: var(--red); border-color: rgba(229,57,53,0.5); animation: badge-pulse 1s ease-in-out infinite; }
+#network-badge[data-mode="critical"]::before { background: var(--red); box-shadow: 0 0 8px var(--red); animation: blink 0.7s ease-in-out infinite; }
+@keyframes badge-pulse { 0%,100%{box-shadow:none} 50%{box-shadow:0 0 10px rgba(229,57,53,0.5)} }
+
+/* Call timer */
+#call-timer {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8rem; font-weight: 500; letter-spacing: 2px;
+  color: rgba(255,255,255,0.5);
+  min-width: 48px; text-align: center;
+}
+
+/* Spacers */
+.ctrl-spacer { flex: 1; max-width: 60px; }
+
+/* ── Responsive ─────────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  :root { --pip-w: 120px; --pip-h: 68px; }
+  .lobby-card { width: 95%; }
+  #controls { gap: 8px; padding: 0 12px; }
+  .ctrl-btn { width: 40px; height: 40px; }
+  #btn-end { width: 44px; height: 44px; }
+  .ctrl-btn svg { width: 18px; height: 18px; }
+}
