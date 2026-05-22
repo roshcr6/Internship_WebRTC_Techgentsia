@@ -16,6 +16,7 @@ class VRescuerPeerConnection {
     this._localStream = null;
     this._statsMonitor = null;
     this._remoteStreamFired = false;
+    this._sendersByKind = { audio: null, video: null };
     this._polite = false;
     this._makingOffer = false;
     this._ignoreOffer = false;
@@ -32,7 +33,13 @@ class VRescuerPeerConnection {
   // ── RTCPeerConnection Factory ──────────────────────────────────────────────
 
   _createPC() {
-    const pc = new RTCPeerConnection({ iceServers: VRescuerConfig.ICE_SERVERS });
+    const cfg = VRescuerConfig;
+    const pc = new RTCPeerConnection({
+      iceServers: cfg.ICE_SERVERS,
+      iceCandidatePoolSize: cfg.ICE_CANDIDATE_POOL_SIZE ?? 0,
+      bundlePolicy: cfg.BUNDLE_POLICY ?? 'max-bundle',
+      rtcpMuxPolicy: cfg.RTCP_MUX_POLICY ?? 'require',
+    });
     this._remoteStreamFired = false;
 
     pc.onnegotiationneeded = async () => {
@@ -95,9 +102,16 @@ class VRescuerPeerConnection {
     this._pc = this._createPC();
 
     localStream.getTracks().forEach((track) => {
-      this._pc.addTrack(track, localStream);
+      const sender = this._pc.addTrack(track, localStream);
+      if (track.kind === 'audio' || track.kind === 'video') {
+        this._sendersByKind[track.kind] = sender;
+      }
+      const transceiver = this._pc.getTransceivers().find(t => t.sender === sender);
+      if (transceiver) this._setCodecPreferences(track.kind, transceiver);
       console.log(`[PeerConnection] Added: ${track.kind}`);
     });
+
+    this._applySenderPreferences();
 
     this._signaling.addEventListener('ice-candidate', (e) => this._addIceCandidate(e.detail));
     this._signaling.addEventListener('description',  (e) => this._handleDescription(e.detail));
@@ -184,6 +198,9 @@ class VRescuerPeerConnection {
         params.degradationPreference = profile.degradationPreference;
       }
 
+      if (profile.priority) enc.priority = profile.priority;
+      if (profile.networkPriority) enc.networkPriority = profile.networkPriority;
+
       await sender.setParameters(params);
 
       if (profile.targetHeight) {
@@ -201,6 +218,24 @@ class VRescuerPeerConnection {
     }
   }
 
+  applyVideoSenderParams({ maxBitrate, maxFramerate }) {
+    if (!this._pc) return false;
+    const sender = this._sendersByKind.video || this._pc.getSenders().find(s => s.track?.kind === 'video');
+    if (!sender || !sender.setParameters) return false;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+      const enc = params.encodings[0];
+      if (typeof maxBitrate === 'number') enc.maxBitrate = maxBitrate;
+      if (typeof maxFramerate === 'number') enc.maxFramerate = maxFramerate;
+      sender.setParameters(params);
+      return true;
+    } catch (e) {
+      console.warn('[PeerConnection] applyVideoSenderParams failed:', e);
+      return false;
+    }
+  }
+
   /**
    * Replace the outgoing video track mid-call.
    * Used to swap camera ↔ screen share.
@@ -209,10 +244,11 @@ class VRescuerPeerConnection {
    */
   async replaceVideoTrack(newTrack) {
     if (!this._pc) return false;
-    const sender = this._pc.getSenders().find(s => s.track?.kind === 'video');
+    const sender = this._sendersByKind.video || this._pc.getSenders().find(s => s.track?.kind === 'video');
     if (!sender) return false;
     try {
       await sender.replaceTrack(newTrack);
+      this._sendersByKind.video = sender;
       // Swap in local stream reference
       const old = this._localStream.getVideoTracks()[0];
       if (old) this._localStream.removeTrack(old);
@@ -243,6 +279,79 @@ class VRescuerPeerConnection {
 
   setSignalingReady(ready) {
     this._canNegotiate = !!ready;
+  }
+
+  // ── Outbound Track Control (independent of local capture) ───────────────
+
+  async setOutboundEnabled(kind, enabled) {
+    if (!this._pc) return false;
+    const sender = this._sendersByKind[kind] || this._pc.getSenders().find(s => s.track?.kind === kind || s.track === null);
+    if (!sender) return false;
+    try {
+      if (enabled) {
+        const track = this._localStream?.getTracks().find(t => t.kind === kind) || null;
+        await sender.replaceTrack(track);
+      } else {
+        await sender.replaceTrack(null);
+      }
+      this._sendersByKind[kind] = sender;
+      return true;
+    } catch (e) {
+      console.warn('[PeerConnection] setOutboundEnabled failed:', e);
+      return false;
+    }
+  }
+
+  _applySenderPreferences() {
+    const cfg = VRescuerConfig;
+    const audioSender = this._sendersByKind.audio;
+    if (audioSender?.setParameters) {
+      try {
+        const params = audioSender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        const enc = params.encodings[0];
+        if (cfg.AUDIO_MAX_BITRATE_BPS) enc.maxBitrate = cfg.AUDIO_MAX_BITRATE_BPS;
+        if (typeof cfg.AUDIO_DTX === 'boolean') enc.dtx = cfg.AUDIO_DTX;
+        if (cfg.AUDIO_PRIORITY) enc.priority = cfg.AUDIO_PRIORITY;
+        if (cfg.AUDIO_NETWORK_PRIORITY) enc.networkPriority = cfg.AUDIO_NETWORK_PRIORITY;
+        audioSender.setParameters(params);
+      } catch (e) {
+        console.warn('[PeerConnection] Audio sender prefs failed:', e);
+      }
+    }
+
+    const videoSender = this._sendersByKind.video;
+    if (videoSender?.setParameters) {
+      try {
+        const params = videoSender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        const enc = params.encodings[0];
+        if (cfg.VIDEO_PRIORITY) enc.priority = cfg.VIDEO_PRIORITY;
+        if (cfg.VIDEO_NETWORK_PRIORITY) enc.networkPriority = cfg.VIDEO_NETWORK_PRIORITY;
+        videoSender.setParameters(params);
+      } catch (e) {
+        console.warn('[PeerConnection] Video sender prefs failed:', e);
+      }
+    }
+  }
+
+  _setCodecPreferences(kind, transceiver) {
+    if (!transceiver?.setCodecPreferences) return;
+    const caps = RTCRtpSender.getCapabilities(kind);
+    if (!caps?.codecs?.length) return;
+
+    const order = (codec) => {
+      const mt = codec.mimeType.toLowerCase();
+      if (kind === 'audio') return mt === 'audio/opus' ? 0 : 10;
+      if (mt === 'video/vp8')  return 0;
+      if (mt === 'video/h264') return 1;
+      if (mt === 'video/vp9')  return 2;
+      return 10;
+    };
+
+    const sorted = [...caps.codecs].sort((a, b) => order(a) - order(b));
+    try { transceiver.setCodecPreferences(sorted); }
+    catch (e) { console.warn('[PeerConnection] setCodecPreferences failed:', e); }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

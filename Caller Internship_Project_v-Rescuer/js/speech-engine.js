@@ -43,6 +43,9 @@ class VRescuerSpeechEngine extends EventTarget {
     // State
     this._isActive = false;
     this._source   = 'none';
+    this._modelId  = this._selectModelId();
+    this._inferHistory = [];
+    this._lastSwitchTs = 0;
 
     this._initWorker();
   }
@@ -52,7 +55,7 @@ class VRescuerSpeechEngine extends EventTarget {
   preloadModel() {
     if (this._modelReady || this._modelLoading || !this._worker) return;
     this._modelLoading = true;
-    this._worker.postMessage({ type: 'load', modelId: VRescuerConfig.AI_MODEL_ID });
+    this._worker.postMessage({ type: 'load', modelId: this._modelId });
     this._emit('status', { state: 'loading', progress: 0, message: 'Loading AI transcription model…' });
   }
 
@@ -76,6 +79,21 @@ class VRescuerSpeechEngine extends EventTarget {
     this._stopAIMode();
     this._stopNativeMode();
     this._source = 'none';
+  }
+
+  setModelPolicy(policy) {
+    if (!policy) return;
+    VRescuerConfig.AI_MODEL_POLICY = policy;
+    const target = this._selectModelId();
+    if (target !== this._modelId) this._switchModel(target, `Switching model → ${policy}`);
+  }
+
+  setLowLatencyMode(enabled) {
+    VRescuerConfig.AI_LOW_LATENCY_MODE = !!enabled;
+    if (this._isActive && this._modelReady) {
+      this._stopAIMode();
+      this._startAIMode();
+    }
   }
 
   get modelReady() { return this._modelReady; }
@@ -133,6 +151,7 @@ class VRescuerSpeechEngine extends EventTarget {
 
       case 'result':
         if (!this._isActive || !msg.text) break;
+        this._trackInference(msg.inferenceMs ?? 0);
         this._emit('final', { text: msg.text, source: 'ai', inferenceMs: msg.inferenceMs ?? 0 });
         break;
 
@@ -155,9 +174,12 @@ class VRescuerSpeechEngine extends EventTarget {
     this._emit('status', { state: 'active', message: '🤖 Whisper AI transcribing…' });
 
     const audioOnlyStream = new MediaStream(this._mediaStream.getAudioTracks());
+    const chunkMs = VRescuerConfig.AI_LOW_LATENCY_MODE
+      ? VRescuerConfig.AI_LOW_LATENCY_CHUNK_MS
+      : VRescuerConfig.AI_CHUNK_MS;
     this._recorder = new MediaRecorder(audioOnlyStream, {
       mimeType:            this._getSupportedMime(),
-      audioBitsPerSecond:  16000,
+      audioBitsPerSecond:  VRescuerConfig.AI_AUDIO_BPS ?? 24000,
     });
     this._recorder.ondataavailable = (e) => {
       if (e.data?.size > 100) {
@@ -167,7 +189,7 @@ class VRescuerSpeechEngine extends EventTarget {
         this._processNextChunk();
       }
     };
-    this._recorder.start(VRescuerConfig.AI_CHUNK_MS);
+    this._recorder.start(chunkMs);
     console.log('[SpeechEngine] AI mode started.');
   }
 
@@ -184,15 +206,37 @@ class VRescuerSpeechEngine extends EventTarget {
     if (!this._worker || !this._modelReady || !this._isActive) return;
 
     this._processingChunk = true;
+    // Prefer most recent audio to minimize latency under load.
+    if (this._chunkQueue.length > 1) {
+      this._chunkQueue = [this._chunkQueue[this._chunkQueue.length - 1]];
+    }
     const blob = this._chunkQueue.shift();
     try {
       const arrayBuf = await blob.arrayBuffer();
-      if (!this._decodeCtx) this._decodeCtx = new AudioContext({ sampleRate: 16000 });
+      if (!this._decodeCtx) {
+        this._decodeCtx = new AudioContext({
+          sampleRate: 16000,
+          latencyHint: VRescuerConfig.AI_AUDIO_LATENCY_HINT ?? 'interactive',
+        });
+      }
       const audioBuf = await this._decodeCtx.decodeAudioData(arrayBuf);
       const float32     = audioBuf.getChannelData(0);
       const transferable = float32.buffer.slice(0);
+      const chunkLengthS = VRescuerConfig.AI_LOW_LATENCY_MODE
+        ? VRescuerConfig.AI_LOW_LATENCY_CHUNK_LEN_S
+        : VRescuerConfig.AI_CHUNK_LEN_S;
+      const strideLengthS = VRescuerConfig.AI_LOW_LATENCY_MODE
+        ? VRescuerConfig.AI_LOW_LATENCY_STRIDE_S
+        : VRescuerConfig.AI_STRIDE_S;
       this._worker.postMessage(
-        { type: 'transcribe', id: ++this._requestSeq, audio: new Float32Array(transferable), sampleRate: 16000 },
+        {
+          type: 'transcribe',
+          id: ++this._requestSeq,
+          audio: new Float32Array(transferable),
+          sampleRate: 16000,
+          chunkLengthS,
+          strideLengthS,
+        },
         [transferable],
       );
     } catch (err) {
@@ -205,6 +249,59 @@ class VRescuerSpeechEngine extends EventTarget {
   _getSupportedMime() {
     return ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4']
       .find(t => MediaRecorder.isTypeSupported(t)) ?? '';
+  }
+
+  _trackInference(ms) {
+    if (!ms) return;
+    this._inferHistory.push(ms);
+    if (this._inferHistory.length > 6) this._inferHistory.shift();
+    const avg = this._inferHistory.reduce((s, v) => s + v, 0) / this._inferHistory.length;
+    this._maybeSwitchModel(avg);
+  }
+
+  _maybeSwitchModel(avgMs) {
+    const cfg = VRescuerConfig;
+    if (!cfg.AI_AUTO_SWITCH || cfg.AI_MODEL_POLICY !== 'auto') return;
+    const now = performance.now();
+    if (now - this._lastSwitchTs < (cfg.AI_SWITCH_COOLDOWN_MS ?? 20_000)) return;
+
+    const fast = cfg.AI_MODEL_FAST;
+    const best = this._selectModelId();
+    if (avgMs > cfg.AI_MAX_INFER_MS && this._modelId !== fast) {
+      this._switchModel(fast, 'Latency high — switching to fast model');
+      return;
+    }
+    if (avgMs < cfg.AI_UPGRADE_MS && this._modelId === fast && best !== fast) {
+      this._switchModel(best, 'Latency stable — upgrading model');
+    }
+  }
+
+  _switchModel(modelId, reason) {
+    if (!this._worker || modelId === this._modelId) return;
+    this._modelId = modelId;
+    this._modelReady = false;
+    this._modelLoading = true;
+    this._lastSwitchTs = performance.now();
+    this._emit('status', { state: 'loading', progress: 0, message: reason });
+    if (this._isActive) {
+      this._stopAIMode();
+      if (this._nativeSupport) this._startNativeMode();
+    }
+    this._worker.postMessage({ type: 'load', modelId });
+  }
+
+  _selectModelId() {
+    const cfg = VRescuerConfig;
+    const policy = cfg.AI_MODEL_POLICY || 'auto';
+    if (policy === 'best') return cfg.AI_MODEL_BEST;
+    if (policy === 'fast') return cfg.AI_MODEL_FAST;
+    if (policy === 'balanced') return cfg.AI_MODEL_BALANCED;
+
+    const cores = navigator.hardwareConcurrency ?? 4;
+    const mem = navigator.deviceMemory ?? 4;
+    if (cores >= 8 && mem >= 8) return cfg.AI_MODEL_BEST;
+    if (cores >= 6 && mem >= 4) return cfg.AI_MODEL_BALANCED;
+    return cfg.AI_MODEL_FAST;
   }
 
   // ── Native Mode ───────────────────────────────────────────────────────────

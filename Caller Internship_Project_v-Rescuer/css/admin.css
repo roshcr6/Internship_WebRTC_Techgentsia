@@ -458,8 +458,8 @@ html, body {
 }
 .sr-val.small { font-size: 0.62rem; color: var(--text-2); }
 .sr-val.mono  { font-family: var(--font-mono); }
-.sr-val[data-open="true"]  { color: var(--green); }
-.sr-val[data-open="false"] { color: var(--text-4); }
+.sr-val[data-on="true"] { color: #43a047; }
+.sr-val[data-on="false"] { color: rgba(255,255,255,0.55); }
 
 /* ── AI Status ────────────────────────────────────────────────────────────── */
 .ai-state-badge {

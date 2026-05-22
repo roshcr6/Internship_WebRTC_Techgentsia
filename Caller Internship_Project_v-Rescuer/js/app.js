@@ -26,12 +26,20 @@ class VRescuerApp {
     this._speechEngine = new VRescuerSpeechEngine();
     this._statsMonitor = null;
 
+    this._videoCtrl = new VRescuerVideoController(this._peerConn);
+    this._audioCtrl = new VRescuerAudioController(this._peerConn);
+    this._aiCtrl    = new VRescuerAIController(this._speechEngine);
+
     this._role          = null;
     this._networkState  = 'good';
     this._inCall        = false;
     this._captionBuffer = '';
     this._transcript    = [];       // { ts, source, text }[]
     this._screenStream  = null;     // active screen share stream (if any)
+    this._readyInterval = null;
+    this._peerReady     = false;
+    this._ruralMode     = false;
+    this._ruralBackup   = null;
 
     this._ui = new VRescuerUI(this);
 
@@ -58,13 +66,13 @@ class VRescuerApp {
 
   _wireSpeechEngine() {
     this._speechEngine.addEventListener('interim', (e) => {
-      if (this._networkState !== 'critical') return;
+      if (!['low','audio','critical'].includes(this._networkState)) return;
       this._dataChannel.sendInterim(e.detail.text);
       this._ui.updateLocalCaption(this._captionBuffer, e.detail.text, e.detail.source);
     });
 
     this._speechEngine.addEventListener('final', (e) => {
-      if (this._networkState !== 'critical') return;
+      if (!['low','audio','critical'].includes(this._networkState)) return;
       this._captionBuffer += e.detail.text + ' ';
       this._dataChannel.sendFinal(e.detail.text);
       this._ui.updateLocalCaption(this._captionBuffer, '', e.detail.source);
@@ -118,11 +126,24 @@ class VRescuerApp {
     this._inCall = true;
     this._ui.setPhase('connecting');
     this._ui.log(`Initializing as ${role === 'caller' ? '📡 Caller' : '📻 Callee'}…`);
+    this._peerReady = false;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 30 },
+          resizeMode: 'crop-and-scale',
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: { ideal: 1 },
+          sampleRate: 48000,
+          sampleSize: 16,
+        },
       });
       const camTrack = stream.getVideoTracks()[0];
       if (camTrack) camTrack.contentHint = 'motion';
@@ -131,21 +152,25 @@ class VRescuerApp {
       this._ui.log('✓ Camera & microphone acquired.');
 
       // Preload AI model during call setup
-      this._speechEngine.setStream(stream);
-      this._speechEngine.preloadModel();
+      this._aiCtrl.setStream(stream);
+      this._aiCtrl.preload();
       this._ui.log('⏳ Whisper AI model preloading in background…');
 
       this._signaling.init(role);
       this._peerConn.setPoliteRole(role === 'callee');
       this._peerConn.setSignalingReady(false);
       await this._peerConn.init(stream);
-      await this._peerConn.setVideoQuality('good');
+      await this._videoCtrl.setQuality('good');
 
       this._peerConn.onRemoteStream = (remoteStream) => {
         this._ui.setRemoteStream(remoteStream);
         this._ui.log('✓ Remote stream connected.');
         this._ui.setPhase('connected');
         this._startStatsMonitor();
+        if (this._readyInterval) {
+          clearInterval(this._readyInterval);
+          this._readyInterval = null;
+        }
       };
 
       this._peerConn.onConnectionStateChange = (state) => {
@@ -159,21 +184,41 @@ class VRescuerApp {
 
       this._peerConn.onIceStateChange = (state) => this._ui.setIceState(state);
 
-      if (role === 'caller') {
-        this._dataChannel.create(this._peerConn.pc);
-        this._signaling.send('ready', {});
-        this._ui.log('Waiting for callee to join…');
-        this._signaling.addEventListener('peer-ready', async () => {
+      const onPeerReady = async () => {
+        if (this._peerReady) return;
+        this._peerReady = true;
+        if (this._readyInterval) {
+          clearInterval(this._readyInterval);
+          this._readyInterval = null;
+        }
+        if (role === 'caller') {
           this._peerConn.setSignalingReady(true);
           this._ui.log('✓ Callee ready — negotiating…');
           await this._peerConn.createOffer();
-        }, { once: true });
+        } else {
+          this._ui.log('✓ Caller ready — waiting for offer…');
+        }
+      };
+
+      this._signaling.addEventListener('peer-ready', onPeerReady);
+
+      const sendReady = () => {
+        try { this._signaling.send('ready', {}); }
+        catch (e) { console.warn('[App] Failed to send ready:', e); }
+      };
+
+      if (role === 'caller') {
+        this._dataChannel.create(this._peerConn.pc);
+        this._ui.log('Waiting for callee to join…');
+        sendReady();
+        this._readyInterval = setInterval(sendReady, 1000);
       } else {
         this._peerConn.onDataChannel = (ch) => {
           this._dataChannel.attach(ch);
           this._ui.log('✓ DataChannel connected.');
         };
-        this._signaling.send('ready', {});
+        sendReady();
+        this._readyInterval = setInterval(sendReady, 1000);
         this._peerConn.setSignalingReady(true);
         this._ui.log('✓ Ready — waiting for offer…');
       }
@@ -195,6 +240,9 @@ class VRescuerApp {
     this._statsMonitor.addEventListener('stats-update', (e) => {
       this._ui.updateStats(e.detail);
       this._ui.updateQualityBadge(e.detail.qualityScore);
+      this._videoCtrl.adapt(e.detail, this._networkState);
+      const perf = this._videoCtrl.getPerfState();
+      this._ui.setPerfMode(perf);
       // Forward quality score to admin
       if (this._ui._adminBridge) this._ui._adminBridge.sendQuality(e.detail.qualityScore);
     });
@@ -218,18 +266,31 @@ class VRescuerApp {
         if (prevState === 'critical') {
           this._ui.log('📶 Network recovered — restoring full A/V…');
           this._ui.showToast('📶 Network recovered — A/V restored', 'ok');
-          pc.setVideoEnabled(true);
-          pc.setAudioEnabled(true);
-          await pc.setVideoQuality('good');
-          this._speechEngine.stop();
+          await this._videoCtrl.setOutboundEnabled(true);
+          await this._audioCtrl.setOutboundEnabled(true);
+          await this._videoCtrl.setQuality('good');
+          this._aiCtrl.stop();
+          this._ui.hideCaptionOverlay();
+          this._captionBuffer = '';
+          this._dataChannel.sendStatus('RECOVERY');
+        } else if (prevState === 'audio') {
+          this._ui.log('📶 Network stable — restoring video…');
+          this._ui.showToast('📶 Video restored', 'ok');
+          await this._videoCtrl.setOutboundEnabled(true);
+          await this._videoCtrl.setQuality('good');
+          this._aiCtrl.stop();
           this._ui.hideCaptionOverlay();
           this._captionBuffer = '';
           this._dataChannel.sendStatus('RECOVERY');
         } else if (prevState === 'degraded') {
           this._ui.log('📶 Network stable — restoring video…');
           this._ui.showToast('📶 Video restored', 'ok');
-          pc.setVideoEnabled(true);
-          await pc.setVideoQuality('good');
+          await this._videoCtrl.setOutboundEnabled(true);
+          await this._videoCtrl.setQuality('good');
+          this._aiCtrl.stop();
+          this._ui.hideCaptionOverlay();
+          this._captionBuffer = '';
+          this._dataChannel.sendStatus('RECOVERY');
         }
         this._ui.setNetworkMode('good');
         break;
@@ -237,12 +298,18 @@ class VRescuerApp {
       case 'degraded':
         this._ui.log('⚠ Bandwidth low — reducing video quality…');
         this._ui.showToast('⚠ Bandwidth low — video quality reduced', 'warn');
-        pc.setVideoEnabled(true);
-        await pc.setVideoQuality('degraded');
+        await this._videoCtrl.setOutboundEnabled(true);
+        await this._audioCtrl.setOutboundEnabled(true);
+        await this._videoCtrl.setQuality('degraded');
         if (prevState === 'critical') {
-          pc.setAudioEnabled(true);
-          this._speechEngine.stop();
+          this._aiCtrl.stop();
           this._ui.hideCaptionOverlay();
+          this._dataChannel.sendStatus('RECOVERY');
+        } else if (prevState === 'audio') {
+          await this._videoCtrl.setOutboundEnabled(true);
+          this._aiCtrl.stop();
+          this._ui.hideCaptionOverlay();
+          this._captionBuffer = '';
           this._dataChannel.sendStatus('RECOVERY');
         }
         this._ui.setNetworkMode('degraded');
@@ -251,28 +318,72 @@ class VRescuerApp {
       case 'low':
         this._ui.log('⚠ Bandwidth very low — switching to low video…');
         this._ui.showToast('⚠ Bandwidth very low — low video mode', 'warn');
-        pc.setVideoEnabled(true);
-        await pc.setVideoQuality('low');
+        await this._videoCtrl.setOutboundEnabled(true);
+        await this._audioCtrl.setOutboundEnabled(true);
+        await this._videoCtrl.setQuality('low');
         if (prevState === 'critical') {
-          pc.setAudioEnabled(true);
-          this._speechEngine.stop();
+          this._aiCtrl.stop();
           this._ui.hideCaptionOverlay();
           this._dataChannel.sendStatus('RECOVERY');
+        } else if (prevState === 'audio') {
+          await this._videoCtrl.setOutboundEnabled(true);
+          this._aiCtrl.stop();
+          this._ui.hideCaptionOverlay();
+          this._captionBuffer = '';
+          this._dataChannel.sendStatus('RECOVERY');
         }
+        this._aiCtrl.start();
+        this._ui.showCaptionOverlay();
         this._ui.setNetworkMode('low');
+        break;
+
+      case 'audio':
+        this._ui.log('🎧 Bandwidth very low — switching to audio only…');
+        this._ui.showToast('🎧 Audio only mode', 'warn');
+        await this._videoCtrl.setOutboundEnabled(false);
+        await this._audioCtrl.setOutboundEnabled(true);
+        this._aiCtrl.start();
+        this._ui.showCaptionOverlay();
+        this._ui.setNetworkMode('audio');
         break;
 
       case 'critical':
         this._ui.log('🚨 CRITICAL — activating DataChannel caption fallback…');
         this._ui.showToast('🚨 Critical — live captions active', 'error');
-        pc.setVideoEnabled(false);
-        pc.setAudioEnabled(false);
+        await this._videoCtrl.setOutboundEnabled(false);
+        await this._audioCtrl.setOutboundEnabled(false);
         this._dataChannel.sendStatus('CRITICAL_FALLBACK');
-        this._speechEngine.start();
+        this._aiCtrl.start();
         this._ui.showCaptionOverlay();
         this._ui.setNetworkMode('critical');
         this._ui.log('💬 Live captions active — voice is being transcribed.');
         break;
+    }
+  }
+
+  setLowLatencyMode(enabled) {
+    this._aiCtrl.setLowLatencyMode(enabled);
+  }
+
+  setRuralMode(enabled) {
+    const cfg = VRescuerConfig;
+    const rural = cfg.RURAL_PROFILE;
+    this._ruralMode = !!enabled;
+    this._videoCtrl.setRuralMode(this._ruralMode);
+
+    if (this._ruralMode) {
+      this._ruralBackup = {
+        modelPolicy: cfg.AI_MODEL_POLICY,
+        lowLatency: cfg.AI_LOW_LATENCY_MODE,
+      };
+      if (rural?.modelPolicy) this._aiCtrl.setModelPolicy(rural.modelPolicy);
+      if (typeof rural?.lowLatency === 'boolean') this._aiCtrl.setLowLatencyMode(rural.lowLatency);
+      if (this._inCall) this._videoCtrl.setQuality(rural?.forceProfile ?? 'rural');
+    } else if (this._ruralBackup) {
+      this._aiCtrl.setModelPolicy(this._ruralBackup.modelPolicy);
+      this._aiCtrl.setLowLatencyMode(this._ruralBackup.lowLatency);
+      if (this._inCall) this._videoCtrl.setQuality('good');
+      this._ruralBackup = null;
     }
   }
 
@@ -366,6 +477,10 @@ class VRescuerApp {
 
   endCall() {
     if (!this._inCall) return;
+    if (this._readyInterval) {
+      clearInterval(this._readyInterval);
+      this._readyInterval = null;
+    }
     if (this._screenStream) {
       this._screenStream.getTracks().forEach(t => t.stop());
       this._screenStream = null;
@@ -453,6 +568,21 @@ class VRescuerUI {
         );
       });
     }
+
+    const lowLatencyBtn = document.getElementById('btn-low-latency');
+    if (lowLatencyBtn) {
+      lowLatencyBtn.classList.toggle('active', !!VRescuerConfig.AI_LOW_LATENCY_MODE);
+      lowLatencyBtn.addEventListener('click', () => {
+        VRescuerConfig.AI_LOW_LATENCY_MODE = !VRescuerConfig.AI_LOW_LATENCY_MODE;
+        lowLatencyBtn.classList.toggle('active', !!VRescuerConfig.AI_LOW_LATENCY_MODE);
+        this._app.setLowLatencyMode(VRescuerConfig.AI_LOW_LATENCY_MODE);
+        this.showToast(
+          VRescuerConfig.AI_LOW_LATENCY_MODE ? 'Low latency enabled' : 'Low latency disabled',
+          'info'
+        );
+      });
+    }
+
 
     // Mic toggle
     document.getElementById('btn-mic')?.addEventListener('click', () => {
@@ -598,7 +728,13 @@ class VRescuerUI {
   setNetworkMode(mode) {
     if (this.modeEl) {
       this.modeEl.setAttribute('data-mode', mode);
-      this.modeEl.textContent = { good: 'Healthy', degraded: 'Reduced Video', low: 'Low Video', critical: 'Captions' }[mode] ?? mode;
+      this.modeEl.textContent = {
+        good: 'Healthy',
+        degraded: 'Reduced Video',
+        low: 'Low Video',
+        audio: 'Audio Only',
+        critical: 'Captions',
+      }[mode] ?? mode;
     }
     // FIX: pass only 'to' — bridge derives 'from' internally
     this._adminBridge.sendStateChange(mode);
@@ -706,6 +842,7 @@ class VRescuerUI {
   setDataChannelStatus(open){ this._adminBridge.sendDCStats({ open, ts: Date.now() }); }
   setModelStatus(detail)    { this._adminBridge.sendAIStatus(detail); }
   setAIStatus(text)         { this._adminBridge.sendLog(`[AI] ${text}`); }
+  setPerfMode(perf)          { this._adminBridge.sendPerfMode(perf); }
   updateStats(stats) {
     this._adminBridge.sendStats(stats);
     const bps   = stats.bitrateBps ?? 0;

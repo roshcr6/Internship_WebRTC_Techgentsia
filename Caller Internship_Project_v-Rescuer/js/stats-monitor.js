@@ -214,13 +214,17 @@ class VRescuerStatsMonitor extends EventTarget {
     ) {
       desired = 'critical';
     } else if (
-      (bitrateBps > 0 && bitrateBps < thresholds.low) ||
+      (bitrateBps > 0 && bitrateBps < thresholds.audioOnly) ||
       packetLossRatio > cfg.PACKET_LOSS_LOW
+    ) {
+      desired = 'audio';
+    } else if (
+      (bitrateBps > 0 && bitrateBps < thresholds.low) ||
+      packetLossRatio > cfg.PACKET_LOSS_THRESHOLD
     ) {
       desired = 'low';
     } else if (
-      (bitrateBps > 0 && bitrateBps < thresholds.audioOnly) ||
-      packetLossRatio > cfg.PACKET_LOSS_THRESHOLD
+      bitrateBps > 0 && bitrateBps < cfg.BITRATE_THRESHOLD_DEGRADED
     ) {
       desired = 'degraded';
     }

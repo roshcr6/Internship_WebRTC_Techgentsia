@@ -126,6 +126,11 @@
           <small>Very Low Video</small>
         </div>
         <span class="sm-arrow">→</span>
+        <div class="sm-node" id="sm-audio" data-state="audio">
+          <span class="sm-icon">🎧</span>Audio
+          <small>Audio Only</small>
+        </div>
+        <span class="sm-arrow">→</span>
         <div class="sm-node" id="sm-critical" data-state="critical">
           <span class="sm-icon">🚨</span>Critical
           <small>&lt;15 kbps</small>
@@ -172,6 +177,11 @@
       <span class="sr-key">Model State</span>
       <span class="sr-val ai-state-badge" id="ai-model-state">standby</span>
     </div>
+
+    <!-- Performance Mode -->
+    <div class="side-section-label">Performance Mode</div>
+    <div class="stat-row"><span class="sr-key">Pro Quality</span><span class="sr-val" id="perf-pro" data-on="false">off</span></div>
+    <div class="stat-row"><span class="sr-key">Rural Profile</span><span class="sr-val" id="perf-rural" data-on="false">off</span></div>
     <div style="padding:4px 14px 8px;">
       <div id="ai-progress-wrap" style="display:none;">
         <div id="ai-progress-bar"></div>
@@ -203,6 +213,7 @@
       <button class="sim-btn good"     id="admin-sim-good">     <span>✅</span> Force: Healthy</button>
       <button class="sim-btn degraded" id="admin-sim-degraded"> <span>⚠️</span> Force: Reduced Video</button>
       <button class="sim-btn low"      id="admin-sim-low">      <span>🟣</span> Force: Low Video</button>
+      <button class="sim-btn low"      id="admin-sim-audio">    <span>🎧</span> Force: Audio Only</button>
       <button class="sim-btn critical" id="admin-sim-critical"> <span>🚨</span> Force: Critical</button>
     </div>
     <div class="sim-note">

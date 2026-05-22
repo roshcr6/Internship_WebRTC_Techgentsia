@@ -59,6 +59,11 @@ class VRescuerAdminBridge {
     this._post({ type: 'quality', data: { score, ts: Date.now() } });
   }
 
+  sendPerfMode(perf) {
+    if (!this._active) return;
+    this._post({ type: 'perf', data: { ...perf, ts: Date.now() } });
+  }
+
   destroy() {
     this._active = false;
     try { this._ch.close(); } catch (e) { /* ignore */ }

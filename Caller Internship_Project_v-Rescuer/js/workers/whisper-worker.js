@@ -20,21 +20,35 @@ env.backends.onnx.wasm.wasmPaths  =
   'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/';
 
 let transcriber      = null;
+let currentModelId   = '';
 let isLoading        = false;
 let noiseFloor       = 0;
 let noiseCalibCount  = 0;
 let noiseCalibSum    = 0;
 const NOISE_CALIB_N  = 3;
 
+let lastChunkLen = 2;
+let lastStride   = 0.25;
+
 self.onmessage = async ({ data: msg }) => {
   switch (msg.type) {
     case 'load':      await _loadModel(msg.modelId ?? 'Xenova/whisper-tiny.en'); break;
-    case 'transcribe': await _transcribe(msg.id, msg.audio, msg.sampleRate ?? 16000); break;
+    case 'transcribe':
+      if (typeof msg.chunkLengthS === 'number') lastChunkLen = msg.chunkLengthS;
+      if (typeof msg.strideLengthS === 'number') lastStride = msg.strideLengthS;
+      await _transcribe(msg.id, msg.audio, msg.sampleRate ?? 16000);
+      break;
   }
 };
 
 async function _loadModel(modelId) {
-  if (transcriber) { self.postMessage({ type: 'ready', modelId }); return; }
+  if (transcriber && currentModelId === modelId) {
+    self.postMessage({ type: 'ready', modelId });
+    return;
+  }
+  if (transcriber && currentModelId !== modelId) {
+    transcriber = null;
+  }
   if (isLoading)   return;
   isLoading = true;
   self.postMessage({ type: 'loading_progress', status: 'Initializing ONNX runtime…', progress: 0, file: '' });
@@ -52,6 +66,7 @@ async function _loadModel(modelId) {
       },
     });
     isLoading = false;
+    currentModelId = modelId;
     self.postMessage({ type: 'ready', modelId });
   } catch (err) {
     isLoading = false;
@@ -82,8 +97,12 @@ async function _transcribe(id, audio, sampleRate) {
   const t0 = performance.now();
   try {
     const out  = await transcriber(processed, {
-      sampling_rate: sampleRate, language: 'english', task: 'transcribe',
-      return_timestamps: false, chunk_length_s: 2, stride_length_s: 0.25,
+      sampling_rate: sampleRate,
+      language: 'english',
+      task: 'transcribe',
+      return_timestamps: false,
+      chunk_length_s: lastChunkLen,
+      stride_length_s: lastStride,
     });
     const raw  = (out.text ?? '').trim();
     const text = HALLUCINATION.test(raw) ? '' : raw;

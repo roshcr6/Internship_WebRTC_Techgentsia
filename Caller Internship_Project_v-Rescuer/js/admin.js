@@ -107,6 +107,10 @@ ch.addEventListener('message', ({ data: msg }) => {
       renderDCStatus(msg.data);
       if (msg.data.open) setText('dc-status', 'Open ✓');
       break;
+
+    case 'perf':
+      renderPerfMode(msg.data);
+      break;
   }
 });
 
@@ -211,7 +215,7 @@ function renderCharts() {
 
 // ── State Machine ─────────────────────────────────────────────────────────────
 function renderStateMachine(current) {
-  ['good','degraded','low','critical'].forEach(s => {
+  ['good','degraded','low','audio','critical'].forEach(s => {
     document.getElementById(`sm-${s}`)?.classList.toggle('active', s === current);
   });
 }
@@ -221,7 +225,13 @@ function renderNetworkState(mode) {
   const el = document.getElementById('network-state-badge');
   if (!el) return;
   el.setAttribute('data-mode', mode);
-  el.textContent = { good: '● Healthy', degraded: '⚠ Reduced Video', low: '⚠ Low Video', critical: '🚨 Critical' }[mode] ?? mode;
+  el.textContent = {
+    good: '● Healthy',
+    degraded: '⚠ Reduced Video',
+    low: '⚠ Low Video',
+    audio: '🎧 Audio Only',
+    critical: '🚨 Critical',
+  }[mode] ?? mode;
 }
 
 // ── Phase ─────────────────────────────────────────────────────────────────────
@@ -246,6 +256,20 @@ function renderAIStatus({ state: s, progress, message }) {
 function renderDCStatus({ open }) {
   const el = document.getElementById('dc-status');
   if (el) { el.textContent = open ? 'Open ✓' : 'Closed'; el.dataset.open = open; }
+}
+
+// ── Performance Mode ─────────────────────────────────────────────────────────
+function renderPerfMode({ proActive, rural }) {
+  const proEl = document.getElementById('perf-pro');
+  if (proEl) {
+    proEl.textContent = proActive ? 'on' : 'off';
+    proEl.dataset.on = proActive ? 'true' : 'false';
+  }
+  const ruralEl = document.getElementById('perf-rural');
+  if (ruralEl) {
+    ruralEl.textContent = rural ? 'on' : 'off';
+    ruralEl.dataset.on = rural ? 'true' : 'false';
+  }
 }
 
 // ── Log ───────────────────────────────────────────────────────────────────────
@@ -361,7 +385,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('admin-sim-good')?.addEventListener('click',     () => simulate('good'));
   document.getElementById('admin-sim-degraded')?.addEventListener('click', () => simulate('degraded'));
   document.getElementById('admin-sim-low')?.addEventListener('click',      () => simulate('low'));
+  document.getElementById('admin-sim-audio')?.addEventListener('click',    () => simulate('audio'));
   document.getElementById('admin-sim-critical')?.addEventListener('click', () => simulate('critical'));
+
+  // State machine nodes act as simulation shortcuts
+  document.getElementById('sm-good')?.addEventListener('click',     () => simulate('good'));
+  document.getElementById('sm-degraded')?.addEventListener('click', () => simulate('degraded'));
+  document.getElementById('sm-low')?.addEventListener('click',      () => simulate('low'));
+  document.getElementById('sm-audio')?.addEventListener('click',    () => simulate('audio'));
+  document.getElementById('sm-critical')?.addEventListener('click', () => simulate('critical'));
 
   // Chart resize observer
   const ro = new ResizeObserver(() => renderCharts());

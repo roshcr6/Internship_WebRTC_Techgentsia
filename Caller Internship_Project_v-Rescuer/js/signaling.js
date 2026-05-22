@@ -25,7 +25,12 @@ class VRescuerSignaling extends EventTarget {
 
   send(type, payload) {
     if (!this._channel) throw new Error('[Signaling] Not initialized.');
-    this._channel.postMessage({ type, payload, from: this._role, timestamp: Date.now() });
+    let safePayload = payload;
+    // BroadcastChannel requires structured-cloneable data; RTCSessionDescription is not.
+    if (payload && typeof payload === 'object' && payload.type && payload.sdp) {
+      safePayload = { type: payload.type, sdp: payload.sdp };
+    }
+    this._channel.postMessage({ type, payload: safePayload, from: this._role, timestamp: Date.now() });
     console.log(`[Signaling] Sent: ${type}`);
   }
 

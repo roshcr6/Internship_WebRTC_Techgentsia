@@ -8,10 +8,10 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Sora:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="css/call.css" />
 </head>
-<body>
+<body data-phase="idle">
 
 <!-- ════════════════════════  LOBBY  ════════════════════════════════════════ -->
 <div id="lobby">
@@ -36,16 +36,9 @@
         </button>
       </div>
 
-      <div class="lobby-features">
-        <div class="feat"><span>⚡</span>Adaptive fallback</div>
-        <div class="feat"><span>🧠</span>Whisper AI captions</div>
-        <div class="feat"><span>📶</span>Quality score</div>
-        <div class="feat"><span>🖥</span>Screen share</div>
-      </div>
     </div>
 
     <div class="lobby-footer">
-      <span class="tech-stack">BroadcastChannel · WebRTC · Whisper AI</span>
       <a class="admin-link-btn" href="admin.html" target="_blank" id="admin-link">Admin Dashboard ↗</a>
     </div>
 
@@ -150,6 +143,9 @@
     <!-- Auto-tune toggle -->
     <button class="ctrl-btn ctrl-btn-toggle" id="btn-auto-tune" title="Toggle auto-tune">AT</button>
 
+    <!-- Low-latency toggle -->
+    <button class="ctrl-btn ctrl-btn-toggle" id="btn-low-latency" title="Toggle low latency">LL</button>
+
     <!-- End Call -->
     <button class="ctrl-btn ctrl-btn-end" id="btn-end" title="End call" disabled>
       <svg viewBox="0 0 24 24"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/><line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
@@ -164,6 +160,7 @@
 <script src="js/stats-monitor.js"></script>
 <script src="js/data-channel.js"></script>
 <script src="js/peer-connection.js"></script>
+<script src="js/media-pipeline.js"></script>
 <script src="js/admin-bridge.js"></script>
 <script type="module" src="js/speech-engine.js"></script>
 <script src="js/app.js" defer></script>
